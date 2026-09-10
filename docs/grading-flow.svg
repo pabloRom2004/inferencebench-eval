@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1640" height="1156" viewBox="0 0 1640 1156" role="img" aria-labelledby="title description">
+  <title id="title">InferenceBench: Prompt → Agent → Grader</title>
+  <desc id="description">The prompt supplies the scenario, Mistral model, H100 hardware, and serving contract. Before optimization, Inspect loads the cached quality reference and long prompts, then measures a Transformers speed baseline. The agent edits start_server.sh and tests repeatedly with evaluate.py on development prompts. Final grading restarts the saved submission, measures held-out speed and 500-question MMLU-Pro quality, and judges integrity. The score is the scenario objective divided by the same-run baseline. Epochs and seeds are averaged before the geometric mean across scenarios.</desc>
+  <defs>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; fill: #eeeeee; }
+      .heading { font-size: 28px; font-weight: 700; }
+      .label { font-size: 21px; font-weight: 600; }
+      .body { font-size: 18px; }
+      .small { font-size: 17px; fill: #b4b4b4; }
+      .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
+      .scenario { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; font-size: 19px; fill: #dadada; }
+      .meaning { font-size: 18px; fill: #d7d7d7; }
+      .column { font-size: 13px; font-weight: 600; letter-spacing: 1.5px; fill: #9d9d9d; }
+      .panel { fill: #191919; stroke: #393939; stroke-width: 1.5; }
+      .slot { fill: #222222; stroke: #3c3c3c; stroke-width: 1.5; }
+      .connector { fill: none; stroke: #9a9a9a; stroke-width: 2; }
+    </style>
+  </defs>
+  <rect width="1640" height="1156" rx="20" fill="#121212"/>
+
+  <!-- Prompt → Agent → Grader. -->
+  <path class="connector" d="M440 178 H628"/>
+  <path d="M638 178 L626 170 L626 186 Z" fill="#9a9a9a"/>
+  <path class="connector" d="M990 178 H1178"/>
+  <path d="M1188 178 L1176 170 L1176 186 Z" fill="#9a9a9a"/>
+  <text class="small" x="1090" y="157" text-anchor="middle">Saved submission</text>
+
+  <g id="prompt">
+    <rect class="panel" x="40" y="36" width="400" height="355" rx="16"/>
+    <text class="heading" x="66" y="86">Prompt</text>
+    <rect class="slot" x="64" y="109" width="352" height="54" rx="9"/>
+    <text class="body" x="84" y="143">Scenario and optimization objective</text>
+    <rect x="64" y="179" width="352" height="185" rx="10" fill="#1c1c1c" stroke="#3c3c3c" stroke-width="1.5"/>
+    <text class="label" x="84" y="214">Task prompt</text>
+    <rect x="84" y="231" width="312" height="48" rx="8" fill="#242424" stroke="#474747" stroke-width="1.5"/>
+    <text class="body" x="102" y="261">Mistral 7B</text>
+    <text class="small" x="378" y="260" text-anchor="end">32K context</text>
+    <rect class="slot" x="84" y="292" width="312" height="48" rx="8"/>
+    <text class="body" x="102" y="322">H100 · serving instructions</text>
+  </g>
+
+  <g id="agent">
+    <rect class="panel" x="650" y="36" width="340" height="287" rx="16"/>
+    <text class="heading" x="676" y="86">Agent</text>
+    <rect class="slot" x="674" y="109" width="292" height="56" rx="9"/>
+    <text class="mono" x="694" y="145" font-size="21">start_server.sh</text>
+    <text class="small" x="946" y="144" text-anchor="end">Edit</text>
+    <rect class="slot" x="674" y="182" width="292" height="56" rx="9"/>
+    <text class="mono" x="694" y="218" font-size="21">evaluate.py</text>
+    <text class="small" x="946" y="217" text-anchor="end">Test</text>
+    <text class="small" x="820" y="272" text-anchor="middle">Repeat development measurements</text>
+    <text class="small" x="820" y="296" text-anchor="middle">Refine the inference engine</text>
+  </g>
+
+  <g id="grader">
+    <rect class="panel" x="1200" y="36" width="400" height="510" rx="16"/>
+    <text class="heading" x="1226" y="86">Grader</text>
+    <text class="small" x="1226" y="113">Inspect · at the end of the sample</text>
+    <rect class="slot" x="1224" y="132" width="352" height="110" rx="9"/>
+    <text class="label" x="1242" y="165">Validate submission</text>
+    <text class="small" x="1242" y="195">Restart · quality ≥95% of reference</text>
+    <text class="small" x="1242" y="220">Check contamination and model use.</text>
+    <rect x="1224" y="258" width="352" height="98" rx="9" fill="#242424" stroke="#464646" stroke-width="1.5"/>
+    <text class="label mono" x="1242" y="289">speedup</text>
+    <text class="small" x="1242" y="325">Final objective ÷ baseline objective.</text>
+    <rect x="1224" y="372" width="352" height="128" rx="9" fill="#242424" stroke="#424242" stroke-width="1.5"/>
+    <text class="label mono" x="1242" y="404">aggregate_speedup</text>
+    <text class="small" x="1242" y="439">Mean epochs, then seeds per scenario;</text>
+    <text class="small" x="1242" y="465">geometric mean across scenarios.</text>
+  </g>
+
+  <!-- Development feedback uses separate prompts from final held-out scoring. -->
+  <path class="connector" d="M736 323 V402"/>
+  <path d="M736 412 L728 400 L744 400 Z" fill="#9a9a9a"/>
+  <path class="connector" d="M904 424 V345"/>
+  <path d="M904 335 L896 347 L912 347 Z" fill="#9a9a9a"/>
+  <text class="small" x="714" y="378" text-anchor="end">Tool calls</text>
+  <text class="small" x="926" y="378">Dev feedback</text>
+
+  <g id="references">
+    <rect class="panel" x="40" y="424" width="368" height="286" rx="16"/>
+    <text class="label" x="66" y="468">Bundled inputs</text>
+    <text class="body" x="66" y="509">MMLU-Pro reference</text>
+    <text class="small" x="66" y="538">500 questions · seed 248 · Mistral 7B</text>
+    <text class="small" x="66" y="565">151/500 correct · .eval + JSON</text>
+    <path d="M66 587 H382" stroke="#3c3c3c"/>
+    <text class="body" x="66" y="620">LongBench prompts</text>
+    <text class="small" x="66" y="649">Default: 10 requests per profile</text>
+    <text class="small" x="66" y="676">Original: full counts and all seeds</text>
+  </g>
+
+  <g id="scoring">
+    <rect x="452" y="424" width="716" height="702" rx="16" fill="#191919" stroke="#4e4e4e" stroke-width="1.5"/>
+    <text class="heading" x="480" y="468">Scoring</text>
+    <text class="small" x="480" y="501">Same objectives; development uses separate prompts.</text>
+    <text class="column" x="488" y="537">SCENARIO</text>
+    <text class="column" x="700" y="537">OBJECTIVE</text>
+    <path d="M480 550 H1140" stroke="#3c3c3c"/>
+    <rect x="472" y="562" width="676" height="52" rx="4" fill="#202020"/>
+    <rect x="472" y="678" width="676" height="70" rx="4" fill="#202020"/>
+
+    <text class="scenario" x="488" y="594">A · TTFT</text>
+    <text class="meaning" x="700" y="594">1 / p50 time to first token</text>
+    <text class="scenario" x="488" y="649">B · TPOT</text>
+    <text class="meaning" x="700" y="649">1 / p50 time per output token</text>
+    <text class="scenario" x="488" y="706">C · throughput</text>
+    <text class="meaning" x="700" y="706">Geometric mean of request throughput:</text>
+    <text class="small" x="700" y="732">burst, Poisson, and constant arrival</text>
+    <text class="scenario" x="488" y="785">D · combined</text>
+    <text class="meaning" x="700" y="785">Geometric mean of 1 / TTFT, 1 / TPOT,</text>
+    <text class="small" x="700" y="811">and request throughput (p50 latencies)</text>
+
+    <path d="M480 852 H1140" stroke="#3c3c3c"/>
+    <text class="label" x="488" y="889">Before optimization</text>
+    <text class="small" x="488" y="919">Load the cached quality reference and long prompts.</text>
+    <text class="small" x="488" y="945">Measure Transformers speed on the same H100.</text>
+    <path d="M480 964 H1140" stroke="#3c3c3c"/>
+    <text class="label" x="488" y="997">Final measurements</text>
+    <text class="small" x="488" y="1027">Restore trusted evaluator files and held-out inputs.</text>
+    <text class="small" x="488" y="1053">Measure speed and quality from the restarted submission.</text>
+    <path d="M480 1080 H1140" stroke="#3c3c3c"/>
+    <text class="small" x="480" y="1105">Quality reference is cached; submitted-server quality is measured.</text>
+  </g>
+
+  <g id="outcomes">
+    <rect class="panel" x="1200" y="580" width="400" height="230" rx="16"/>
+    <text class="label" x="1226" y="621">Outcome accounting</text>
+    <text class="small" x="1226" y="659">Invalid submission → 1×</text>
+    <text class="small" x="1226" y="691">Valid slowdown → below 1×</text>
+    <text class="small" x="1226" y="723">Unavailable judge → unscored</text>
+    <text class="small" x="1226" y="755">Infrastructure failure → Inspect error</text>
+    <text class="small" x="1226" y="787">Report incomplete runs explicitly.</text>
+  </g>
+</svg>
