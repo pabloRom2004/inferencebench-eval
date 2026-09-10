@@ -200,17 +200,23 @@ def test_solver_override_and_judge_role(local_task, tmp_path):
     env.terminate.assert_awaited_once()
 
 
-def test_prepared_request_prefixes():
-    """Load ten exact rows for every original scenario and seed without requiring corpus dependencies."""
-    task = inference_bench()
+@pytest.mark.parametrize("configuration", ["default", "original"])
+def test_prepared_request_prefixes(configuration):
+    """Load complete configured workloads for every scenario and seed while preserving shared prefixes."""
+    config = load_config(f"run_configs/{configuration}.yaml")["task"]["args"]
+    task = inference_bench(**config)
     cache = load_request_cache(task.dataset[0].metadata)
+    prefixes = load_request_cache(inference_bench().dataset[0].metadata)
     seeds = load_config("run_configs/original.yaml")["task"]["args"]["seed_pairs"]
     for scenario, record in SCENARIOS.items():
         lengths = record["config"]["synthetic"]
         for seed in {seed for pair in seeds for seed in pair}:
-            rows = cached_requests(cache, scenario, seed, 10)
-            assert len(rows) == 10
+            rows = cached_requests(cache, scenario, seed, config["request_limit"])
+            assert len(rows) == (10 if configuration == "default" else record["config"]["num_requests"])
+            assert rows[:10] == cached_requests(prefixes, scenario, seed, 10)
             assert cached_requests(cache, scenario, seed, 1) == rows[:1]
+            with pytest.raises(ValueError, match="requested"):
+                cached_requests(cache, scenario, seed, len(rows) + 1)
             for row in rows:
                 assert row["messages"]
                 assert row["ignore_eos"] is True

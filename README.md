@@ -155,9 +155,9 @@ The configs show common Inspect controls. Additional native options can be added
 
 The integrity judge defaults to GPT-6 Astra through OpenRouter with low reasoning effort; `original.yaml` retains Claude Sonnet 4.6. The default judge uses the provider's `strict_tools: false` argument because its read-only inspection tool has optional pagination parameters. This avoids a strict-schema API rejection while retaining the tool's argument validation. The judge can be rebound with `--model-role integrity=...`. It inspects source and launch logs through a read-only tool. Set `task.args.scorer.args.include_transcript` to control whether the scorer also exports the subject conversation and asks the judge to review it: `default.yaml` enables this, while `original.yaml` disables it to follow upstream's environment-based review. Disabling it removes any stale harness transcript export; ordinary CLI logs in the submission environment remain accessible. Malformed verdicts are retried three times and then marked unscored. It is separate from the subject model.
 
-The default loads ten prepared requests for each development and evaluation seed from `assets/datasets/longbench/requests.json.gz`. These are exact prefixes of the original seeded sampler, with its text truncation, variable input/output lengths, temperature, and EOS behavior preserved. The asset covers all four scenarios and all six original seeds. Later runs read only the selected small files, avoiding a download and tokenization of the full 503-document LongBench pool. The speed baseline and the submitted server’s MMLU-Pro quality test still run on the allocated GPU; the Transformers MMLU-Pro reference is reused.
+Both configurations load bundled long prompts: `default.yaml` selects ten requests per development and evaluation seed from `assets/datasets/longbench/requests.json.gz`, and `original.yaml` selects the full scenario counts from `assets/datasets/longbench/original-requests.json.gz`. They preserve the original seeded selection, sampled input/output lengths, temperature, and EOS behavior. Both assets cover all four scenarios and all six original seeds. Runs send only the selected requests to the sandbox, avoiding a download and tokenization of the full 503-document LongBench pool. The speed baseline and the submitted server’s MMLU-Pro quality test still run on the allocated GPU; the Transformers MMLU-Pro reference is reused.
 
-This smaller workload changes the experiment: scenario C replays ten requests per profile and cannot reach the original burst concurrency of 64. For the full workload, use `original.yaml`, or set both `request_cache: null` and `request_limit: null`. Original counts are A: 128, B: 64, C: 256 per profile, and D: 96. Unsupported cached seeds, model/context settings, or larger request counts fail before GPU allocation; regenerate the cache or select the original sampler.
+The default's smaller workload changes the experiment: scenario C replays ten requests per profile and cannot reach the original burst concurrency of 64. For the full workload, use `original.yaml`, which retains counts of A: 128, B: 64, C: 256 per profile, and D: 96 with `request_limit: null`. To sample directly from the source corpus, set `request_cache: null`. Unsupported cached seeds, model/context settings, or larger request counts fail before GPU allocation; regenerate the cache or select the original sampler.
 
 The packaged data includes [LongBench attribution](src/inferencebench/assets/licenses/LONGBENCH_NOTICE) and its declared Apache 2.0 license. Its metadata records source-pool, tokenizer, scenario, and request hashes. To regenerate it on a CPU machine, supply a gzip-compressed original 503-row `samples.jsonl` and a saved Mistral tokenizer:
 
@@ -169,6 +169,10 @@ uv run --with 'transformers[sentencepiece]<5' --with datasets --with aiohttp --w
   --tokenizer /path/to/saved-tokenizer \
   --output src/inferencebench/assets/datasets/longbench/requests.json.gz
 ```
+
+To regenerate the original configuration's complete request sets, add `--original-counts` and change the output filename to `original-requests.json.gz`. The default cache contains the first ten requests of each complete set.
+
+Preparing the full sets exposed an upstream truncation error: decoding a token prefix can leave the actual prompt one token below the scenario's minimum and abort sampling. Cache preparation restores the omitted token only when the resulting prompt fits the original sampled bounds. The full cache records each correction in `truncation_repairs`; source selection and output budgets are unchanged. The default's ten-request prefixes require no corrections.
 
 ## Scoring and fidelity
 
@@ -187,7 +191,7 @@ uv run inspect eval --run-config my-run.yaml --model openrouter/z-ai/glm-5.3-fla
 
 Preparation allocates one configured GPU and runs only the MMLU-Pro reference. No optimizing agent or integrity judge runs. Each custom reference gets a separate folder in `.cache/inferencebench/mmlu_pro/`, excluded from Git and built packages. Subsequent preparations reuse a valid reference. Use `--force` to remeasure; the previous cache is replaced only after the new reference succeeds. Local references take precedence over the bundled one. An explicit `quality_cache` folder must match all reference settings too. To deliberately recompute inside each full-evaluation sample, set `quality_cache: null`.
 
-The long-prompt settings remain independent: `default.yaml` uses the bundled ten-request prefixes and `original.yaml` uses the full original sampler. Changing the server model, context, workload seeds, or request count may also require regenerating `request_cache` or setting it to `null`, as described above.
+The long-prompt settings remain independent of MMLU-Pro: `default.yaml` uses the bundled ten-request prefixes and `original.yaml` uses the bundled full original request sets. Changing the server model, context, workload seeds, or request count may also require regenerating `request_cache` or setting it to `null`, as described above.
 
 To regenerate the shipped reference using the built-in model, seed, sample count, and context:
 

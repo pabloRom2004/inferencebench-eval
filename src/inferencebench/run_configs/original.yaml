@@ -13,7 +13,7 @@ task:
     agent_seconds: 7200
     system_prompt: original
     request_limit: null
-    request_cache: null
+    request_cache: assets/datasets/longbench/original-requests.json.gz
     quality_samples: 500
     quality_seed: 248
     quality_cache: auto

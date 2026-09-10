@@ -14,6 +14,7 @@ from inspect_ai.util import ExecResult
 
 from inferencebench import inference_bench
 from inferencebench.assets.scripts import runtime
+from inferencebench.dataset import SCENARIOS
 from inferencebench.prepare_quality import measure_reference, publish_reference
 from inferencebench.quality_cache import (
     load_quality_cache,
@@ -87,9 +88,13 @@ def test_missing_reference_prevents_allocation(reference, monkeypatch):
         inference_bench(**{**options, "quality_seed": 42})
 
 
-def test_cached_reference_full_setup(reference, monkeypatch, tmp_path):
-    """Drive native Inspect setup through cached runtime preparation without fetching or recomputing quality data."""
+@pytest.mark.parametrize("configuration", ["default", "original"])
+def test_cached_reference_full_setup(reference, monkeypatch, tmp_path, configuration):
+    """Drive both configurations through cached runtime preparation without fetching prompts or recomputing quality."""
     options, destination, _, _ = reference
+    options = {**load_config(f"run_configs/{configuration}.yaml")["task"]["args"],
+               "quality_samples": 2, "quality_cache_dir": options["quality_cache_dir"],
+               "scenarios": "A", "seed_pairs": [[999, 777]] if configuration == "original" else [[21, 1337]]}
     module = importlib.import_module("inferencebench.environment")
     remote = tmp_path / "remote"
     remote.mkdir()
@@ -116,6 +121,7 @@ def test_cached_reference_full_setup(reference, monkeypatch, tmp_path):
 
     runner = SimpleNamespace(load_scenario_config=lambda path: {},
                              _get_tokenizer=lambda model: "tokenizer",
+                             _prepare_requests=Mock(side_effect=AssertionError("long prompts must not be fetched")),
                              _load_requests_jsonl=lambda path, *args: ([json.loads(line) for line in path.read_text().splitlines()], []))
     monkeypatch.setitem(sys.modules, "inference", SimpleNamespace(
         baseline_eval=SimpleNamespace(_run_baseline=lambda *args, **kwargs: {"profiles": {"burst": {"success_count": 1}}}),
@@ -154,6 +160,10 @@ def test_cached_reference_full_setup(reference, monkeypatch, tmp_path):
         observed = json.loads((remote / "quality.json").read_text())
         assert observed["datasets"]["mmlu_pro"][0]["accuracy"] == 0.5
         quality_runner.assert_not_called()
+        runner._prepare_requests.assert_not_called()
+        expected_requests = options["request_limit"] or SCENARIOS["A"]["config"]["num_requests"]
+        for name in ["dev", "heldout"]:
+            assert len((remote / f"{name}-requests.jsonl").read_text().splitlines()) == expected_requests
         assert len(log.samples[0].messages) >= 2
         assert log.samples[0].metadata["quality_cache_provenance"]["identity"] == quality_identity(options)
     finally:
@@ -239,7 +249,7 @@ def test_configs_share_quality_reference(reference, configuration):
     assert task.dataset[0].metadata["quality_cache"] == str(destination)
     assert task.dataset[0].metadata["quality_seed"] == 248
     assert task.dataset[0].metadata["request_limit"] == config["request_limit"]
-    assert (task.dataset[0].metadata["request_cache"] is None) == (configuration == "original")
+    assert Path(task.dataset[0].metadata["request_cache"]).is_file()
 
 
 def test_local_reference_overrides_bundle(reference, monkeypatch, tmp_path):
