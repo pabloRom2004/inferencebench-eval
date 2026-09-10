@@ -1,0 +1,17 @@
+.reference/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.env
+logs/
+run-artifacts/
+.cache/inferencebench/
+build/
+dist/
+.DS_Store
+AGENTS.md
+.vscode/

@@ -1,0 +1,15 @@
+name: InferenceBench
+
+version: 10
+
+paper: https://arxiv.org/abs/2607.20468
+
+source: https://github.com/aisa-group/InferenceBench
+
+revision: 24cdf88f6a4e14ed85d665aa132cecccb3ee95ef
+
+samples: 4
+
+model: mistralai/Mistral-7B-Instruct-v0.3
+
+hardware: NVIDIA H100 80GB

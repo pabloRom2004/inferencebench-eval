@@ -1,0 +1,17 @@
+{
+  "datasets": {
+    "mmlu_pro": [
+      {
+        "seed": 248,
+        "n": 500,
+        "accuracy": 0.302,
+        "correct": 151
+      }
+    ]
+  },
+  "base_model": "mistralai/Mistral-7B-Instruct-v0.3",
+  "model_revision": "c170c708c41dac9275d15a8fff4eca08d52bab71",
+  "backend": "transformers",
+  "dtype": "float16",
+  "reference_log": "reference.eval"
+}

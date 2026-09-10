@@ -1,0 +1,39 @@
+{
+  "downloaded_model_revision": "c170c708c41dac9275d15a8fff4eca08d52bab71",
+  "started_at_unix": 1789035915.695064,
+  "completed_at_unix": 1789039332.963777,
+  "upstream_revision": "24cdf88f6a4e14ed85d665aa132cecccb3ee95ef",
+  "reference_options": {
+    "config_defaults": "default",
+    "gpu_provider": "modal",
+    "gpu_config": null,
+    "base_model": "mistralai/Mistral-7B-Instruct-v0.3",
+    "max_model_len": 32768,
+    "agent_seconds": null,
+    "request_limit": 10,
+    "request_cache": null,
+    "quality_samples": 500,
+    "quality_seed": 248,
+    "quality_cache": null,
+    "quality_cache_dir": ".cache/inferencebench/mmlu_pro",
+    "quality_tau": 0.95,
+    "quality_concurrency": 4,
+    "quality_baseline_max_attempts": 2,
+    "server_wait_seconds": 900,
+    "request_timeout_seconds": 300,
+    "system_prompt": "token_budget",
+    "scenario": "A",
+    "directory": "inference_scenario_a_input_heavy",
+    "dev_seed": 21,
+    "eval_seed": 1337
+  },
+  "input_sha256": {
+    "quality-samples.jsonl": "648e4ec1dbe5129818a3ef49918edbbe113b879cc902739dd48e1acf4dc0d0dc"
+  },
+  "gpu": "name, memory.total [MiB], driver_version\nNVIDIA H100 80GB HBM3, 81559 MiB, 580.95.05\n",
+  "server_versions": {
+    "torch": "2.8.0+cu128",
+    "transformers": "4.57.6",
+    "cuda": "12.8"
+  }
+}

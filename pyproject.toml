@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inferencebench"
+version = "0.1.0"
+description = "InferenceBench for Inspect AI, with CLI and ReAct agents on Modal or RunPod H100"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=1.4.0",
+    "asyncssh>=2.24.0",
+    "ddgs>=9.16.0",
+    "httpx>=0.28.1",
+    "inspect-ai==0.3.263",
+    "inspect-sandboxes==0.5.0",
+    "inspect-swe==0.2.70",
+    "modal==1.5.5",
+    "openai>=3.10.0",
+    "pyyaml>=6",
+]
+
+[project.entry-points.inspect_ai]
+inferencebench = "inferencebench"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["inferencebench*"]
+
+[tool.setuptools.package-data]
+inferencebench = [
+    "run_configs/*.yaml",
+    "assets/licenses/*",
+    "assets/prompts/*.txt",
+    "assets/scripts/*.py",
+    "assets/scripts/*.sh",
+    "assets/datasets/*.json",
+    "assets/datasets/longbench/*.gz",
+    "assets/datasets/mmlu_pro/*/*",
+    "compose.yaml", "runpod.yaml", "Dockerfile", "eval.yaml",
+]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "ruff", "build"]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]

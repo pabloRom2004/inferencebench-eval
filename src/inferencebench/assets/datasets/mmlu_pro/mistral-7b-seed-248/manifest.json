@@ -1,0 +1,21 @@
+{
+  "identity": {
+    "format_version": 1,
+    "upstream_revision": "24cdf88f6a4e14ed85d665aa132cecccb3ee95ef",
+    "backend": "transformers",
+    "dtype": "float16",
+    "base_model": "mistralai/Mistral-7B-Instruct-v0.3",
+    "max_model_len": 32768,
+    "quality_seed": 248,
+    "quality_samples": 500
+  },
+  "model_revision": "c170c708c41dac9275d15a8fff4eca08d52bab71",
+  "sha256": {
+    "quality-samples.jsonl": "648e4ec1dbe5129818a3ef49918edbbe113b879cc902739dd48e1acf4dc0d0dc",
+    "quality.json": "e33c2017603ea8122af1154eb09870e9ef2865af58c5b13ff01cb95b30062bb3",
+    "resolved_generations.jsonl": "462ad0629965d76ececd394708e290e2ffb3be2c26d889b7b2dd8247c9f6242b",
+    "reference.eval": "8a7251d5927bea09058869305b01a1d6bcdd724c59e1c6f0258da9b539d3e14a",
+    "quality-baseline.tar.gz": "e6ff69efa2bd038895ba205e94b1671a1b914ea0b087b59958382025ca287f59",
+    "provenance.json": "2bfc5dbf3a82200c35fba2b4b6aac2311027e3245fde54560c2bcb9fe6460633"
+  }
+}

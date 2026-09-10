@@ -1,0 +1,80 @@
+task:
+  task: inferencebench/inference_bench
+  args:
+    config_defaults: default
+    gpu_provider: modal
+    gpu_config: null
+    # null runs A–D; use A or [A, C] to select scenarios.
+    scenarios: A
+    # [development, evaluation] seeds; one pair instead of three reduces repeat runs.
+    seed_pairs: [[21, 1337]]
+    base_model: mistralai/Mistral-7B-Instruct-v0.3
+    max_model_len: 32768
+    agent_seconds: null
+    system_prompt: token_budget
+    request_limit: 10
+    request_cache: assets/datasets/longbench/requests.json.gz
+    quality_samples: 500
+    quality_seed: 248
+    quality_cache: auto
+    quality_cache_dir: .cache/inferencebench/mmlu_pro
+    quality_tau: 0.95
+    quality_concurrency: 4
+    quality_baseline_max_attempts: 2
+    server_wait_seconds: 900
+    request_timeout_seconds: 300
+    scorer:
+      name: inferencebench.scorers.inference_speedup
+      args:
+        grader_role: integrity
+        judge_prompt: original_judge
+        max_grader_attempts: 3
+        include_transcript: true
+
+solver:
+  # CLI: --solver inspect_swe/claude_code -S cwd=/home/agent/task -S user=root -S version=auto
+  # Swap claude_code for codex_cli, opencode, or gemini_cli; native CLIs can finish early.
+  # In YAML, replace this whole solver block with the CLI name and its own args.
+  solver: inferencebench/react_agent
+  args:
+    tools: [bash, python, web_search]
+    web_search_args:
+      backend: duckduckgo
+      max_results: 10
+      timeout: 5
+    compaction_threshold: 0.75
+    # Submission and early-answer stopping are disabled by default.
+    submit: false
+    nudge_prompt: true
+    token_budget_reminder: true
+
+generate_config:
+  temperature: null
+  max_tokens: null
+  seed: null
+  reasoning_effort: null
+  max_retries: 10
+  attempt_timeout: 900
+
+model_roles:
+  integrity:
+    model: openrouter/openai/gpt-6-astra
+    args:
+      # The read-only inspection tool has optional pagination arguments.
+      strict_tools: false
+    config:
+      temperature: null
+      max_tokens: null
+      reasoning_effort: low
+      max_retries: 10
+      attempt_timeout: 900
+
+eval_config:
+  limit: null
+  # Repeats each scenario–seed sample; 1 avoids additional runs.
+  epochs: 1
+  epochs_reducer: [inferencebench/complete_mean]
+  # Total input-plus-output tokens per sample, including cached input.
+  token_limit: 100000000
+  time_limit: null
+  max_samples: 1

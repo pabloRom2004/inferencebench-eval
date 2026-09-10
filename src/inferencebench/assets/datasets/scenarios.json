@@ -1,0 +1,118 @@
+{
+  "A": {
+    "directory": "inference_scenario_a_input_heavy",
+    "config": {
+      "scenario_id": "A",
+      "name": "Input heavy",
+      "data_source": "longbench_v2",
+      "synthetic": {
+        "input_len": 8192,
+        "output_len": 1024,
+        "range_ratio": 0.8,
+        "ignore_eos": true
+      },
+      "num_requests": 128,
+      "max_new_tokens": 1024,
+      "temperature": 0.2,
+      "concurrency": 1,
+      "quality_max_new_tokens": 256,
+      "profile": {
+        "name": "burst",
+        "pattern": "burst"
+      }
+    },
+    "benchmark": "InferenceBench Scenario A: Input heavy (prefill speed)",
+    "mission": "Minimize time to first token for long-context prompts. Prioritize prefill speed while maintaining performance."
+  },
+  "B": {
+    "directory": "inference_scenario_b_output_heavy",
+    "config": {
+      "scenario_id": "B",
+      "name": "Output heavy",
+      "data_source": "longbench_v2",
+      "synthetic": {
+        "input_len": 1024,
+        "output_len": 8192,
+        "range_ratio": 0.8,
+        "ignore_eos": true
+      },
+      "num_requests": 64,
+      "max_new_tokens": 8192,
+      "temperature": 0.7,
+      "concurrency": 1,
+      "quality_max_new_tokens": 2048,
+      "profile": {
+        "name": "burst",
+        "pattern": "burst"
+      }
+    },
+    "benchmark": "InferenceBench Scenario B: Output heavy (decoding speed)",
+    "mission": "Maximize decoding speed for long outputs. Prioritize generation throughput while keeping responses coherent."
+  },
+  "C": {
+    "directory": "inference_scenario_c_high_load",
+    "config": {
+      "scenario_id": "C",
+      "name": "High load",
+      "data_source": "longbench_v2",
+      "synthetic": {
+        "input_len": 1024,
+        "output_len": 1024,
+        "range_ratio": 0.8,
+        "ignore_eos": true
+      },
+      "num_requests": 256,
+      "max_new_tokens": 1024,
+      "temperature": 0.3,
+      "concurrency": 32,
+      "profiles": [
+        {
+          "name": "burst",
+          "pattern": "burst",
+          "num_requests": 256,
+          "concurrency": 64
+        },
+        {
+          "name": "poisson",
+          "pattern": "poisson",
+          "rate_per_s": 32,
+          "num_requests": 256,
+          "concurrency": 32
+        },
+        {
+          "name": "constant",
+          "pattern": "constant",
+          "rate_per_s": 16,
+          "num_requests": 256,
+          "concurrency": 16
+        }
+      ]
+    },
+    "benchmark": "InferenceBench Scenario C: High load (throughput)",
+    "mission": "Handle maximum concurrent users without errors. Optimize total throughput under burst, poisson, and constant load."
+  },
+  "D": {
+    "directory": "inference_scenario_d_general",
+    "config": {
+      "scenario_id": "D",
+      "name": "General",
+      "data_source": "longbench_v2",
+      "synthetic": {
+        "input_len": 4096,
+        "output_len": 2048,
+        "range_ratio": 0.8,
+        "ignore_eos": true
+      },
+      "num_requests": 96,
+      "max_new_tokens": 2048,
+      "temperature": 0.4,
+      "concurrency": 4,
+      "profile": {
+        "name": "burst",
+        "pattern": "burst"
+      }
+    },
+    "benchmark": "InferenceBench Scenario D: General-purpose optimization",
+    "mission": "Optimize overall inference performance across diverse workloads. Balance latency, throughput, and quality without a single dominant metric."
+  }
+}
