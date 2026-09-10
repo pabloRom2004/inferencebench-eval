@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from inspect_ai import eval as inspect_eval
 from inspect_ai.log import read_eval_log
+from inspect_ai.model import ModelInfo, get_model, get_model_info, set_model_info
+from inspect_ai.model._compaction._compaction import _resolve_threshold
 from inspect_ai.solver import generate
 from inspect_ai.util import ExecResult
 
@@ -89,12 +91,19 @@ def test_missing_reference_prevents_allocation(reference, monkeypatch):
 
 
 @pytest.mark.parametrize("configuration", ["default", "original"])
-def test_cached_reference_full_setup(reference, monkeypatch, tmp_path, configuration):
-    """Drive both configurations through cached runtime preparation without fetching prompts or recomputing quality."""
+@pytest.mark.parametrize("context_length", [None, 1048576])
+def test_cached_reference_full_setup(reference, monkeypatch, tmp_path, configuration, context_length):
+    """Resolve agent context and cached inputs through native Inspect setup without recomputing references."""
     options, destination, _, _ = reference
     options = {**load_config(f"run_configs/{configuration}.yaml")["task"]["args"],
                "quality_samples": 2, "quality_cache_dir": options["quality_cache_dir"],
+               "context_length": context_length,
                "scenarios": "A", "seed_pairs": [[999, 777]] if configuration == "original" else [[21, 1337]]}
+    model_info = importlib.import_module("inspect_ai.model._model_info")
+    monkeypatch.setattr(model_info, "_custom_models", dict(model_info._custom_models))
+    monkeypatch.setattr(model_info, "_result_cache", {})
+    set_model_info("mockllm/cache-test", ModelInfo(context_length=131072, output_tokens=4096))
+    set_model_info("mockllm/independent-judge", ModelInfo(context_length=32768))
     module = importlib.import_module("inferencebench.environment")
     remote = tmp_path / "remote"
     remote.mkdir()
@@ -144,6 +153,12 @@ def test_cached_reference_full_setup(reference, monkeypatch, tmp_path, configura
 
     async def execute(command, **kwargs):
         """Execute the genuine runtime preparation when Inspect invokes the remote adapter."""
+        model = get_model()
+        info = get_model_info(model)
+        assert info.context_length == (context_length or 131072)
+        assert info.output_tokens == 4096
+        assert _resolve_threshold(model, 0.75) == int(0.75 * (context_length or 131072))
+        assert get_model_info("mockllm/independent-judge").context_length == 32768
         if "prepare" in command:
             runtime.prepare(json.loads((remote / "options.json").read_text()))
         return ExecResult(True, 0, "", "")
@@ -166,6 +181,8 @@ def test_cached_reference_full_setup(reference, monkeypatch, tmp_path, configura
             assert len((remote / f"{name}-requests.jsonl").read_text().splitlines()) == expected_requests
         assert len(log.samples[0].messages) >= 2
         assert log.samples[0].metadata["quality_cache_provenance"]["identity"] == quality_identity(options)
+        assert log.samples[0].metadata["context_length"] == context_length
+        assert log.samples[0].metadata["max_model_len"] == 32768
     finally:
         Path(log.location).unlink(missing_ok=True)
 

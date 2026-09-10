@@ -34,6 +34,7 @@ def inference_bench(
     # Workload and optimization budget.
     base_model:              str = DEFAULT_TASK_ARGS["base_model"],
     max_model_len:           int = DEFAULT_TASK_ARGS["max_model_len"],
+    context_length:          int | None = DEFAULT_TASK_ARGS["context_length"],
     agent_seconds:           int | None = DEFAULT_TASK_ARGS["agent_seconds"],
     request_limit:           int | None = DEFAULT_TASK_ARGS["request_limit"],
     request_cache:           str | None = DEFAULT_TASK_ARGS["request_cache"],
@@ -66,6 +67,8 @@ def inference_bench(
         if name not in {"scenarios", "seed_pairs", "scorer"}
     }
     counts = [max_model_len, quality_samples, quality_concurrency, quality_baseline_max_attempts]
+    if context_length is not None and (type(context_length) is not int or context_length <= 0):
+        raise ValueError("context_length must be a positive integer or null")
     if request_limit is not None:
         counts.append(request_limit)
     if any(type(value) is not int or value <= 0 for value in counts):

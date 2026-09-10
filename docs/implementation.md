@@ -137,6 +137,7 @@ The configs show common Inspect controls. Additional native options can be added
 | `seed_pairs` | `[[21,1337]]` | Development and held-out evaluation seeds; `original.yaml` retains three pairs |
 | `base_model` | `mistralai/Mistral-7B-Instruct-v0.3` | Fixed model checkpoint for the benchmark |
 | `max_model_len` | 32768 | Original evaluator and baseline context limit |
+| `context_length` | `null` | Optimizing model's context window; used by Inspect compaction and model bridges |
 | `agent_seconds` | `null` | Optional optimization wall-clock limit; `original.yaml` uses 7200 seconds |
 | `eval_config.token_limit` | 100000000 | Total input-plus-output tokens per attempt; override with `--token-limit` |
 | `request_limit` | 10 | Requests per load profile; `null` requests the original scenario count |
@@ -175,6 +176,8 @@ To regenerate the original configuration's complete request sets, add `--origina
 Preparing the full sets exposed an upstream truncation error: decoding a token prefix can leave the actual prompt one token below the scenario's minimum and abort sampling. Cache preparation restores the omitted token only when the resulting prompt fits the original sampled bounds. The full cache records each correction in `truncation_repairs`; source selection and output budgets are unchanged. The default's ten-request prefixes require no corrections.
 
 ## Scoring and fidelity
+
+Set `task.args.context_length: 1048576` for DeepSeek V4.1 Flash, matching the capacity reported by [OpenRouter's model metadata](https://openrouter.ai/api/v1/models). Inspect's 75% ReAct compaction threshold then resolves to 786,432 input tokens. The default `null` uses Inspect's model information. This setting describes the optimizing agent; `max_model_len` controls the Mistral server being optimized. The provider still enforces its actual context limit, and each CLI retains its own context-management policy.
 
 Both configurations select `quality_cache: auto`. The task checks for a complete MMLU-Pro reference before GPU allocation, matching `base_model`, `quality_seed`, `quality_samples`, context length, float16 Transformers backend, and upstream evaluator revision. `base_model` is the server being optimized; changing Inspect's `--model` (the optimizing agent) does not invalidate this reference. The cache includes the exact questions, every resolved answer, the initial results and explicit recovery attempts, accuracy, model revision, and a checksum manifest. A changed model revision is rejected during model preparation. Reuse does not replace the final quality check of the submitted server or the speed baseline measured on that run's GPU.
 

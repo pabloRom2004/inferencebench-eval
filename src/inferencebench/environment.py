@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import anyio
+from inspect_ai.model import ModelInfo, get_model, get_model_info, set_model_info
 from inspect_ai.solver import Solver, solver
 from inspect_ai.util import sandbox, store
 
@@ -40,6 +41,12 @@ def prepare_environment() -> Solver:
 
     async def solve(state, generate):
         """Measure the baseline before starting the optimization clock and retain trusted inputs locally."""
+        if state.metadata["context_length"] is not None:
+            model = get_model()
+            info = get_model_info(model) or ModelInfo()
+            set_model_info(str(model), ModelInfo(**{
+                **info.model_dump(), "context_length": state.metadata["context_length"],
+            }))
         env = gpu_environment()
         folder = (
             Path("run-artifacts")

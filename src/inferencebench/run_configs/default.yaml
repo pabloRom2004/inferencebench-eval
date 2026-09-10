@@ -10,6 +10,8 @@ task:
     seed_pairs: [[21, 1337]]
     base_model: mistralai/Mistral-7B-Instruct-v0.3
     max_model_len: 32768
+    # Optimizing agent's context window; null uses Inspect's model metadata.
+    context_length: null
     agent_seconds: null
     system_prompt: token_budget
     request_limit: 10

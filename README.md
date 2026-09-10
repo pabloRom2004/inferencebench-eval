@@ -114,6 +114,7 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `seed_pairs`: development/evaluation seeds; `[[21,1337]]`, original three pairs.
 - `gpu_provider`: `modal` or `runpod`; `modal`.
 - `base_model`: `mistralai/Mistral-7B-Instruct-v0.3`.
+- `context_length`: optimizing model's context window; `null` uses Inspect's metadata. Set `1048576` for DeepSeek V4.1 Flash.
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
 - `request_cache`: bundled prompts; original uses its full-workload cache. `null` enables corpus sampling.
 - `quality_samples`, `quality_seed`: `500`, `248`.
@@ -154,6 +155,10 @@ The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring re
 Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailable integrity judgments remain unscored; infrastructure failures remain Inspect errors. Report incomplete runs with their completed, scored, and unscored attempt counts.
 
 ## Changelog
+
+### [12] - 2026-09-10
+
+- Add `context_length` to configure the optimizing model's context metadata for compaction and bridges.
 
 ### [11] - 2026-09-10
 
