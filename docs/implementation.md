@@ -99,6 +99,8 @@ The agent must preserve a standalone `start_server.sh`. Final scoring preserves 
 
 Modal remains the default in both run configurations. To use RunPod, select `gpu_provider: runpod` or pass `-T gpu_provider=runpod`. Both providers run the same agent, evaluator, and scoring policy.
 
+RunPod keeps SSH handshake and command-wrapper messages out of the transcript; SSH warnings and failures remain visible. Inspect still records the model's actual tool calls, results, and sandbox operations. The SSH wrapper is transport plumbing, not an additional model turn.
+
 Set `RUNPOD_API_KEY` in the host environment, then launch:
 
 ```bash

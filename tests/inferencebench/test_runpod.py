@@ -698,6 +698,12 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
         log_dir="logs",
     )
     assert log.status == "success", log.error
+    assert not any(
+        event.event == "logger"
+        and (event.message.name or "").startswith("asyncssh")
+        and event.message.level in {"debug", "info"}
+        for event in log.samples[0].events
+    )
     score = log.samples[0].scores["inference_speedup"]
     assert score.value == {"speedup": 2.0}
     assert (Path(log.samples[0].store["artifacts"]) / "quality-baseline.tar.gz").is_file()

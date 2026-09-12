@@ -32,6 +32,8 @@ class RunPodSandbox(SandboxEnvironment):
     def __init__(self, config: dict):
         """Generate per-pod SSH keys and defer resource creation to sample initialization."""
         super().__init__()
+        # Inspect already records tools and results; SSH handshake chatter obscures them.
+        asyncssh.set_log_level("WARNING")
         self.config = config
         self.pod_id = None
         self.host = None
