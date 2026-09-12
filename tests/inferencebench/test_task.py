@@ -1478,7 +1478,18 @@ def test_judge_transcript_toggle(
         """Simulate context compaction after an observable model action."""
         async def solve(state, generate):
             """Keep the event record while replacing the active context with a summary."""
+            from inspect_ai.model import ChatMessageAssistant, ChatMessageTool
+            from inspect_ai.tool import ToolCall
+
+            # CLI tools arrive through the next bridged model input, without ToolEvents.
+            state.messages.extend([
+                ChatMessageAssistant(content="", tool_calls=[ToolCall(
+                    id="cli-tool", function="Bash", arguments={"command": "printf evidence"},
+                )]),
+                ChatMessageTool(content="CLI tool result evidence " + "x" * 3000, tool_call_id="cli-tool"),
+            ])
             state = await generate(state)
+            await get_model().generate(state.messages)
             if compacted:
                 from inspect_ai.model import ChatMessageUser
                 state.messages = [ChatMessageUser(content="Compacted context without the earlier evidence")]
@@ -1494,7 +1505,7 @@ def test_judge_transcript_toggle(
                 ModelOutput.from_content(
                     "mockllm/subject", "subject transcript evidence"
                 )
-            ],
+            ] * 2,
         ),
         model_roles={"integrity": judge},
         display="none",
@@ -1516,6 +1527,7 @@ def test_judge_transcript_toggle(
     ]
     assert reads[0].result == "launcher evidence"
     assert ("subject transcript evidence" in reads[1].result) is enabled
+    assert ("CLI tool result evidence" in reads[1].result) is enabled
     assert local_path(transcript).exists() is enabled
     if enabled:
         evidence = json.loads(local_path(transcript).read_text())
@@ -1523,6 +1535,7 @@ def test_judge_transcript_toggle(
             message.model_dump(mode="json") for message in sample.messages
         ]
         assert "subject transcript evidence" in json.dumps(evidence["events"])
+        assert json.dumps(evidence["events"]).count("CLI tool result evidence") == 1
     else:
         assert "No such file" in reads[1].result
         assert not any(

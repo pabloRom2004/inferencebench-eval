@@ -41,6 +41,8 @@ the port calls its evaluator instead of implementing another one.
    behavior. A separate role-bound model reads the launcher, source, and logs
    through a read-only tool. Default runs additionally expose all recorded model
    outputs and tool results, including history removed by context compaction.
+   Native CLI tool results are recovered from model inputs and saved once even
+   when later API calls repeat the same history.
    The judge returns the original two verdicts; it does not calculate accuracy
    or speed. The adapter uses the full upstream scenario name in its prompt.
 8. **Produce the score.** Divide the submission objective by its same-run

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import time
@@ -275,13 +276,25 @@ def write_agent_transcript(path: Path, state) -> None:
     """Stream model outputs and tool results so the judge retains evidence removed by compaction."""
     fields = {"event", "timestamp", "span_id", "model", "role", "output",
               "function", "arguments", "result", "error"}
+    seen_tools = set()
     with path.open("w") as output:
         output.write('{"events": [\n')
         separator = ""
         for event in transcript().events:
             if event.event not in {"model", "tool"}:
                 continue
-            output.write(separator + event.model_dump_json(include=fields, indent=2))
+            record = event.model_dump(mode="json", include=fields)
+            if event.event == "model":
+                # CLI results live in model inputs, and are repeated on later turns.
+                record["tool_results"] = []
+                for message in event.input:
+                    if message.role == "tool":
+                        content = message.model_dump_json(exclude={"id"})
+                        fingerprint = hashlib.sha256(content.encode()).digest()
+                        if fingerprint not in seen_tools:
+                            seen_tools.add(fingerprint)
+                            record["tool_results"].append(json.loads(content))
+            output.write(separator + json.dumps(record, indent=2))
             separator = ",\n"
         output.write('\n], "messages": ')
         json.dump([m.model_dump(mode="json") for m in state.messages], output, indent=2)
