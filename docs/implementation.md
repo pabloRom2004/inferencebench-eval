@@ -271,3 +271,18 @@ The shared GPU smoke test uses a scripted model to exercise a real H100, real Mi
 A real-agent smoke run on September 10, 2026 used DeepSeek V4.1 Flash with a five-million-token limit on one Modal H100. For scenario A and seed pair `[21, 1337]`, it reused the bundled MMLU-Pro reference and long prompts, then optimized and evaluated a vLLM server. Across ten held-out requests, p50 time to first token fell from 282 ms to 194 ms (1.458×). The submitted server scored 156/500 on MMLU-Pro against the cached 151/500 reference and passed the integrity judge. The run took approximately 63 minutes and consumed 5.04 million optimizer tokens, with the final model call slightly exceeding the limit. This is a single-sample smoke result, not a complete benchmark result.
 
 The standalone package follows the HLE module layout and the neighboring ExploitBench task's short configuration and harness split. To contribute it to Inspect Evals, move `src/inferencebench` to `src/inspect_evals/inferencebench`, update absolute imports and registered names, and register the task in the destination repository. No `.reference/` content is required at runtime. That ignored directory preserves the original checkout, paper, and audit notes.
+
+## Hawk with RunPod
+
+Hawk 2.5.0's deployed Helm template forces Kubernetes sandbox conversion, even
+when `runner.environment.HAWK_RUNNER_PATCH_SANDBOX` is false. The small
+[`infra/hawk-runner/Dockerfile`](../infra/hawk-runner/Dockerfile) uses Hawk's
+existing external-sandbox option at process startup. It changes no benchmark
+logic and retains Hawk's rejection of nonstandard isolation without its
+Kubernetes controls. Use it only for this task's standard RunPod setup.
+
+The feature-branch workflow publishes an immutable commit tag to GHCR. Set
+`runner.image` to that image's digest. Keep provider credentials in Hawk secrets.
+The tested run configuration uses `HAWK_RUNNER_REFRESH_TOKEN: ""` so the supplied
+work API key is not replaced by Hawk OAuth, and a fixed `UV_EXCLUDE_NEWER` date
+so Hawk's default one-week package cutoff does not exclude the required SDK.
