@@ -286,3 +286,9 @@ The feature-branch workflow publishes an immutable commit tag to GHCR. Set
 The tested run configuration uses `HAWK_RUNNER_REFRESH_TOKEN: ""` so the supplied
 work API key is not replaced by Hawk OAuth, and a fixed `UV_EXCLUDE_NEWER` date
 so Hawk's default one-week package cutoff does not exclude the required SDK.
+
+On Hawk, the task saves the restarted `/home/agent/task` workspace, reference and
+final measurements, provenance, and judge transcript under the run's per-sample
+artifact tree. `hawk download-artifacts` retrieves them after GPU cleanup. Local
+runs keep their existing `run-artifacts` folder. An unavailable workspace archive
+is recorded as a copy error without changing the benchmark score.

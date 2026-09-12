@@ -1383,12 +1383,19 @@ def test_replacement_cleanup_after_artifact_failure(local_task, monkeypatch):
     [("default", None), ("original", None), ("default", False), ("original", True)],
 )
 @pytest.mark.parametrize("compacted", [False, True])
+@pytest.mark.parametrize("hawk", [False, True])
 def test_judge_transcript_toggle(
-    local_task, monkeypatch, tmp_path, config_defaults, override, compacted
+    local_task, monkeypatch, tmp_path, config_defaults, override, compacted, hawk
 ):
     """Exercise both configs and overrides through transcript export, actual file reads, and a mock judge."""
     environment = importlib.import_module("inferencebench.environment")
     _, env = local_task
+    if hawk:
+        from inspect_ai.hooks._hooks import get_all_hooks
+        monkeypatch.setenv("HAWK_JOB_ID", "local-artifact-test")
+        hook = next(h for h in get_all_hooks() if isinstance(h, environment.HawkArtifacts))
+        destination = f"memory://inferencebench-test/{tmp_path.name}"
+        monkeypatch.setattr(hook, "destinations", {None: destination})
     args = load_config(f"run_configs/{config_defaults}.yaml")["task"]["args"]
     if override is not None:
         args["scorer"]["args"]["include_transcript"] = override
@@ -1413,7 +1420,8 @@ def test_judge_transcript_toggle(
 
     async def execute(command, **kwargs):
         """Run evidence reads and stale-file removal locally while substituting GPU-only infrastructure."""
-        if command[0] not in {"rm", "sed", "ls"}:
+        archive = command[0] == "tar" and "-czf" in command
+        if command[0] not in {"rm", "sed", "ls"} and not archive:
             return ExecResult(success=True, returncode=0, stdout="", stderr="")
         command = [
             str(local_path(arg)) if arg.startswith("/") else arg for arg in command
@@ -1443,6 +1451,9 @@ def test_judge_transcript_toggle(
     env.resource_id = "local-scoring-sandbox"
     env.restart = AsyncMock(return_value=env)
     env.upload = AsyncMock(side_effect=upload)
+    async def download(remote, local):
+        Path(local).write_bytes(local_path(remote).read_bytes())
+    env.download = AsyncMock(side_effect=download)
     env.write_file = AsyncMock(side_effect=write_file)
     env.exec.side_effect = execute
     monkeypatch.setattr(environment, "gpu_environment", lambda: env)
@@ -1524,6 +1535,16 @@ def test_judge_transcript_toggle(
         is enabled
     )
     env.terminate.assert_awaited_once()
+    if hawk:
+        import io
+        import tarfile
+        fs, path = environment.url_to_fs(f"{destination}/artifacts/{sample.uuid}")
+        assert fs.exists(f"{path}/baseline.json")
+        assert fs.exists(f"{path}/final.json")
+        with tarfile.open(fileobj=io.BytesIO(fs.cat(f"{path}/submission.tar.gz"))) as archive:
+            assert archive.extractfile("task/start_server.sh").read() == b"launcher evidence"
+        assert fs.exists(f"{path}/agent-transcript.json") is enabled
+        fs.rm(path, recursive=True)
 
 
 @pytest.mark.parametrize("value", [None, "false", 0])

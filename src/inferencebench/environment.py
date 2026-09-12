@@ -1,8 +1,11 @@
 import json
+import os
 import time
 from pathlib import Path
 
 import anyio
+from fsspec.core import url_to_fs
+from inspect_ai.hooks import Hooks, hooks
 from inspect_ai.log import transcript
 from inspect_ai.model import ModelInfo, get_model, get_model_info, set_model_info
 from inspect_ai.solver import Solver, solver
@@ -15,6 +18,31 @@ from inferencebench.quality_cache import load_quality_cache, validate_quality_ca
 from inferencebench.runpod_sandbox import RunPodSandbox
 
 REMOTE = "/tmp/inferencebench"
+
+
+@hooks(name="inferencebench_artifacts", description="Retain InferenceBench submissions and measurements on Hawk")
+class HawkArtifacts(Hooks):
+    """Use Hawk's per-sample artifact tree without changing local log placement."""
+
+    def __init__(self):
+        self.destinations = {}
+
+    def enabled(self):
+        return bool(os.environ.get("HAWK_JOB_ID"))
+
+    async def on_eval_set_start(self, data):
+        if data.log_dir.startswith("s3://"):
+            self.destinations[data.eval_set_id] = data.log_dir.rstrip("/")
+
+    async def on_sample_end(self, data):
+        destination = self.destinations.get(data.eval_set_id)
+        folder = data.sample.store.get("artifacts")
+        if destination and folder:
+            fs, path = url_to_fs(f"{destination}/artifacts/{data.sample_id}")
+            await anyio.to_thread.run_sync(lambda: fs.put(folder + "/", path, recursive=True))
+
+    async def on_eval_set_end(self, data):
+        self.destinations.pop(data.eval_set_id, None)
 
 
 def gpu_environment() -> InferenceSandbox | RunPodSandbox:
@@ -227,6 +255,15 @@ async def restart_for_scoring(state, include_transcript: bool):
             evidence = folder / "agent-transcript.json"
             write_agent_transcript(evidence, state)
             await env.upload(str(evidence), f"{REMOTE}/agent-transcript.json")
+        # After restart, background servers can no longer change the saved workspace.
+        if os.environ.get("HAWK_JOB_ID"):
+            try:
+                await checked_exec(env, ["tar", "-czf", f"{REMOTE}/submission.tar.gz",
+                                         "-C", "/home/agent", "task"], 300)
+                await env.download(f"{REMOTE}/submission.tar.gz", str(folder / "submission.tar.gz"))
+            except Exception as error:
+                # Missing artifacts must not turn an invalid submission into an infrastructure error.
+                (folder / "submission-copy-error.txt").write_text(repr(error))
         return env
     except BaseException:
         with anyio.CancelScope(shield=True):
