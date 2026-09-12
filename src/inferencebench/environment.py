@@ -258,18 +258,33 @@ async def restart_for_scoring(state, include_transcript: bool):
             await env.upload(str(evidence), f"{REMOTE}/agent-transcript.json")
         # After restart, background servers can no longer change the saved workspace.
         if os.environ.get("HAWK_JOB_ID"):
-            try:
-                await checked_exec(env, ["tar", "-czf", f"{REMOTE}/submission.tar.gz",
-                                         "-C", "/home/agent", "task"], 300)
-                await env.download(f"{REMOTE}/submission.tar.gz", str(folder / "submission.tar.gz"))
-            except Exception as error:
-                # Missing artifacts must not turn an invalid submission into an infrastructure error.
-                (folder / "submission-copy-error.txt").write_text(repr(error))
+            await copy_submission(env, folder)
         return env
     except BaseException:
         with anyio.CancelScope(shield=True):
             await env.terminate()
         raise
+
+
+async def retain_failed_submission(state):
+    """Save unfinished work before Inspect removes the sandbox after a solver error."""
+    folder = store().get("artifacts")
+    if not os.environ.get("HAWK_JOB_ID") or not folder:
+        return
+    folder = Path(folder)
+    if not (folder / "submission.tar.gz").exists():
+        write_agent_transcript(folder / "agent-transcript.json", state)
+        await copy_submission(gpu_environment(), folder)
+
+
+async def copy_submission(env, folder: Path):
+    """Keep archive failures as diagnostics without replacing the evaluation's outcome."""
+    try:
+        await checked_exec(env, ["tar", "--ignore-failed-read", "-czf", f"{REMOTE}/submission.tar.gz",
+                                 "-C", "/home/agent", "task"], 300)
+        await env.download(f"{REMOTE}/submission.tar.gz", str(folder / "submission.tar.gz"))
+    except Exception as error:
+        (folder / "submission-copy-error.txt").write_text(repr(error))
 
 
 def write_agent_transcript(path: Path, state) -> None:

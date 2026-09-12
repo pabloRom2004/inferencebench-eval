@@ -8,6 +8,7 @@ import inspect_swe
 from inspect_ai.agent import Agent, AgentState, BridgedToolsSpec, agent
 from inspect_ai.model import ChatMessageUser, GenerateInput, get_model, get_model_info
 from inspect_ai.model._generate_config import active_generate_config
+from inspect_ai.util import sandbox
 
 from inferencebench.reminders import cli_reminders, nudge, with_deadline
 from inferencebench.run_config import load_config
@@ -15,6 +16,17 @@ from inferencebench.tools import web_search
 
 DEFAULT_AGENT_ARGS = load_config()["solver"]["args"]
 CLI_HARNESSES = ("claude_code", "codex_cli", "gemini_cli", "kimi_code", "opencode")
+
+
+async def file_cli_prompts(state):
+    """Keep pending user instructions out of argv so server-oriented pkill cannot match them."""
+    for message in reversed(state.messages):
+        if message.role == "assistant":
+            break
+        if message.role == "user" and not message.text.startswith("Read /tmp/inferencebench-input-"):
+            path = f"/tmp/inferencebench-input-{message.id}.txt"
+            await sandbox().write_file(path, message.text)
+            message.content = f"Read {path} and follow its instructions."
 
 
 @agent
@@ -74,6 +86,8 @@ def cli_agent(
             **context_args(harness, args),
         )
         while True:
+            if harness == "claude_code":
+                await file_cli_prompts(state)
             state = await cli(state)
             continuation = nudge(nudge_prompt)
             if continuation is False:

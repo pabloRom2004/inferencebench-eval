@@ -661,7 +661,8 @@ sha256sum -c /tmp/capacity.sha256
             nudge_prompt=False, token_budget_reminder=False,
         ))
     )
-    command = """printf preserved > /usr/local/lib/agent-change
+    command = """for pid in $(pgrep -f '[s]tart_server.sh'); do kill -9 "$pid"; done
+printf preserved > /usr/local/lib/agent-change
 ln /usr/local/lib/agent-change /usr/local/lib/agent-hardlink
 ln -s agent-change /usr/local/lib/agent-symlink
 truncate -s 1G /usr/local/lib/agent-sparse
@@ -679,6 +680,8 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
     subject = get_model(
         "mockllm/subject",
         custom_outputs=[
+            *([ModelOutput.for_tool_call("mockllm/subject", "Bash", {"command": "cat /tmp/inferencebench-input-*.txt"})]
+              if harness == "claude_code" else []),
             ModelOutput.for_tool_call("mockllm/subject", "bash" if harness == "react" else "Bash", {"command": command}),
             ModelOutput.from_content("mockllm/subject", "Ready"),
         ],
@@ -698,6 +701,13 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
         log_dir="logs",
     )
     assert log.status == "success", log.error
+    if harness == "claude_code":
+        sample = read_eval_log(log.location, resolve_attachments=True).samples[0]
+        assert any(
+            "Kernel Optimization" in message.text
+            for event in sample.events if event.event == "model"
+            for message in event.input if message.role == "tool"
+        )
     assert not any(
         event.event == "logger"
         and (event.message.name or "").startswith("asyncssh")

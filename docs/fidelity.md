@@ -30,6 +30,10 @@ the port calls its evaluator instead of implementing another one.
    `cli.py` runs native Inspect SWE CLIs. Both share reminders and continuation
    through `reminders.py`. Claude Code runs inside the GPU sandbox and calls
    GLM through Inspect's bridge. The provider key stays with the controller.
+   Claude Code reads task and continuation instructions from files, preserving
+   their text while keeping server names out of its process arguments. This
+   adds an initial file read compared with passing the prompt directly: the
+   latter let an agent's `pkill -f start_server` kill its own CLI.
    `harness_original.py` separately retains the original time-based CLI loop.
 6. **Restart and measure the submission.** Preserve installed files, discard live
    processes, restore trusted evaluator inputs from the controller, and invoke
@@ -43,6 +47,8 @@ the port calls its evaluator instead of implementing another one.
    outputs and tool results, including history removed by context compaction.
    Native CLI tool results are recovered from model inputs and saved once even
    when later API calls repeat the same history.
+   Hawk also retains unfinished work and the transcript if the solver fails;
+   such attempts remain errors and receive no success score.
    The judge returns the original two verdicts; it does not calculate accuracy
    or speed. The adapter uses the full upstream scenario name in its prompt.
 8. **Produce the score.** Divide the submission objective by its same-run

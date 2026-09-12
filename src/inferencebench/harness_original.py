@@ -6,6 +6,7 @@ from inspect_ai.model import ChatMessageUser
 from inspect_ai.solver import Solver, solver
 from inspect_ai.util import store
 
+from inferencebench.cli import file_cli_prompts
 from inferencebench.prompts import CONTINUE_PROMPT, NUDGE_PROMPT, ORIGINAL_CLI_CONTEXT
 from inferencebench.reminders import with_deadline
 from inferencebench.run_config import load_config
@@ -37,6 +38,8 @@ def original_agent(
         end = store().get("deadline")
         while True:
             state.completed = False
+            if harness == "claude_code":
+                await file_cli_prompts(state)
             state = await agent(state, generate)
             remaining = int(end - time.time()) if end is not None else None
             if not continue_until_deadline or (

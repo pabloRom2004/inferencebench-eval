@@ -132,6 +132,15 @@ Adjustable task and solver defaults are in `src/inferencebench/run_configs/defau
 
 The configs show common Inspect controls. Additional native options can be added under `generate_config` or `eval_config`, or passed through the CLI.
 
+Claude Code receives each pending task or continuation message through a file
+in `/tmp`, with a short instruction to read it. The instruction text is unchanged.
+This avoids putting server names in Claude Code's process arguments, where a
+normal `pkill -f` server restart can accidentally kill the agent. Both maintained
+and original Claude Code adapters use this transport. Inspect SWE 0.2.70 and
+upstream main still passed the full prompt in process arguments when checked
+on 2026-09-13. Hawk task cleanup captures unfinished submissions and transcripts
+before removing a failed agent's sandbox; it preserves the failure outcome.
+
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `config_defaults` | `default` | Packaged fallback for native settings and judge roles; `original.yaml` selects `original` |

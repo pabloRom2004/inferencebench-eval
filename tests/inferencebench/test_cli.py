@@ -2,6 +2,7 @@
 
 import functools
 import importlib
+from unittest.mock import AsyncMock
 
 import pytest
 from inspect_ai import eval as inspect_eval
@@ -66,6 +67,8 @@ def test_cli_continuation_and_scoring(local_task, monkeypatch, harness, continue
         lambda model: ModelInfo(context_length=1048576, output_tokens=131072),
     )
     task, env = local_task
+    env.write_file = AsyncMock()
+    monkeypatch.setattr(CLI, "sandbox", lambda: env)
     task.dataset[0].metadata["agent_seconds"] = None
     task.solver = as_solver(cli_agent(harness, nudge_prompt=continue_work))
     outputs = [ModelOutput.from_content("mockllm/subject", "Ready") for _ in range(5)]
@@ -95,6 +98,8 @@ def test_cli_continuation_and_scoring(local_task, monkeypatch, harness, continue
     env.terminate.assert_awaited_once()
     if harness == "claude_code":
         assert observed[0]["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "1048576"
+        assert "Kernel Optimization" in env.write_file.await_args_list[0].args[1]
+        assert all("start_server.sh" not in request.input[-1].text for request in requests)
 
 
 @pytest.mark.parametrize(

@@ -447,7 +447,9 @@ def test_original_dispatches_configured_cli(
         return stub()
 
     monkeypatch.setattr(HARNESS.inspect_swe, harness, factory)
-    task, _ = local_task
+    task, env = local_task
+    env.write_file = AsyncMock()
+    monkeypatch.setattr(importlib.import_module("inferencebench.cli"), "sandbox", lambda: env)
     task.dataset[0].metadata["agent_seconds"] = seconds
     task.solver = original_agent(
         harness=harness, version=version, continue_until_deadline=continue_until_deadline
@@ -465,6 +467,8 @@ def test_original_dispatches_configured_cli(
     assert observed["user"] == "root"
     if harness == "claude_code":
         assert observed["permission_mode"] == "bypassPermissions"
+        assert all(not call.args[1].startswith("Read /tmp/inferencebench-input-")
+                   for call in env.write_file.await_args_list)
     else:
         assert "permission_mode" not in observed
     assert observed["env"] == {"BASH_MAX_TIMEOUT_MS": "36000000"}
@@ -1425,6 +1429,7 @@ def test_judge_transcript_toggle(
             return ExecResult(success=True, returncode=0, stdout="", stderr="")
         command = [
             str(local_path(arg)) if arg.startswith("/") else arg for arg in command
+            if arg != "--ignore-failed-read"
         ]
         # BSD sed lacks GNU's separator; mapped fixture paths are always absolute.
         if command[0] == "sed":
@@ -1566,3 +1571,49 @@ def test_invalid_transcript_toggle(value):
     args = load_config()["task"]["args"]["scorer"]["args"]
     with pytest.raises(ValueError, match="include_transcript must be a boolean"):
         SCORERS.inference_speedup(**{**args, "include_transcript": value})
+
+
+def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path):
+    """Keep an unfinished launcher and model evidence when the agent fails before scoring."""
+    import io
+    import tarfile
+
+    from inspect_ai.hooks._hooks import get_all_hooks
+
+    environment = importlib.import_module("inferencebench.environment")
+    task, env = local_task
+    monkeypatch.setenv("HAWK_JOB_ID", "failed-agent-test")
+    destination = f"memory://failed-agent/{tmp_path.name}"
+    hook = next(h for h in get_all_hooks() if isinstance(h, environment.HawkArtifacts))
+    monkeypatch.setattr(hook, "destinations", {None: destination})
+    monkeypatch.setattr(environment, "gpu_environment", lambda: env)
+    workspace = tmp_path / "sandbox" / "task"
+    workspace.mkdir(parents=True)
+    launcher = workspace / "start_server.sh"
+    launcher.write_text("unfinished launcher")
+
+    async def download(remote, local):
+        # The transport fixture serves a real archive of the agent's working files.
+        with tarfile.open(local, "w:gz") as archive:
+            archive.add(workspace, arcname="task")
+
+    env.download = AsyncMock(side_effect=download)
+
+    @solver
+    def broken_agent():
+        async def solve(state, generate):
+            await generate(state)
+            raise RuntimeError("native agent died")
+        return solve
+
+    [log] = inspect_eval(task, solver=broken_agent(), model="mockllm/subject",
+                        display="none", log_dir="logs")
+    assert log.status == "error"
+    sample = read_eval_log(log.location).samples[0]
+    assert "native agent died" in sample.error.message
+    assert not sample.scores
+    fs, path = environment.url_to_fs(f"{destination}/artifacts/{sample.uuid}")
+    with tarfile.open(fileobj=io.BytesIO(fs.cat(f"{path}/submission.tar.gz"))) as archive:
+        assert archive.extractfile("task/start_server.sh").read() == b"unfinished launcher"
+    assert json.loads(fs.cat(f"{path}/agent-transcript.json"))["events"]
+    fs.rm(path, recursive=True)

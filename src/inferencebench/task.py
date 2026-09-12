@@ -9,7 +9,7 @@ from inspect_ai.solver import Solver
 from inspect_ai.util import SandboxEnvironmentSpec, registry_create
 
 from inferencebench.dataset import get_inference_dataset
-from inferencebench.environment import prepare_environment
+from inferencebench.environment import prepare_environment, retain_failed_submission
 from inferencebench.quality_cache import load_quality_cache
 from inferencebench.run_config import load_config
 from inferencebench.scorers import scorers_from_spec
@@ -90,6 +90,7 @@ def inference_bench(
     return Task(
         dataset=get_inference_dataset(scenarios, seed_pairs, options),
         setup=prepare_environment(),
+        cleanup=retain_failed_submission,
         solver=_solver_from_config(config["solver"]),
         scorer=scorers_from_spec(scorer),
         sandbox=SandboxEnvironmentSpec(
