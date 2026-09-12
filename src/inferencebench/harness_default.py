@@ -1,30 +1,16 @@
-import asyncio
-import time
 from functools import partial
 
 from inspect_ai.agent import AgentState, as_solver, react
 from inspect_ai.model import ChatMessageUser, CompactionSummary
 from inspect_ai.solver import Solver, solver
 from inspect_ai.tool import bash, python
-from inspect_ai.util import sample_limits, store
 
-from inferencebench.prompts import NUDGE_PROMPT, TOKEN_BUDGET_REMINDER
+from inferencebench.cli import cli_agent as cli_agent
+from inferencebench.reminders import budget_reminder, nudge, with_deadline
 from inferencebench.run_config import load_config
 from inferencebench.tools import web_search
 
 DEFAULT_AGENT_ARGS = load_config()["solver"]["args"]
-
-
-def budget_reminder() -> str:
-    """Describe the effective Inspect token budget, including runtime overrides and consumed tokens."""
-    budget = sample_limits().token
-    if budget.limit is None:
-        return ""
-    return TOKEN_BUDGET_REMINDER.prompt.format(
-        used=budget.usage,
-        limit=budget.limit,
-        remaining=max(0, budget.remaining),
-    )
 
 
 @solver
@@ -52,7 +38,7 @@ def react_agent(
         # Native Inspect limits end the attempt; nudges have no count limit.
         notes = []
         if not has_tools:
-            notes.append(NUDGE_PROMPT.prompt)
+            notes.append(str(nudge(nudge_prompt)))
         if token_budget_reminder:
             notes.append(budget_reminder())
         return "\n\n".join(note for note in notes if note) or True
@@ -72,18 +58,6 @@ def react_agent(
         if token_budget_reminder and (reminder := budget_reminder()):
             state.messages.append(ChatMessageUser(content=reminder))
 
-        # The maintained default has no deadline; original settings can retain one.
-        end = store().get("deadline")
-        deadline = asyncio.timeout(
-            max(0, end - time.time()) if end is not None else None
-        )
-        try:
-            async with deadline:
-                return await agent(state, generate)
-        except TimeoutError:
-            if not deadline.expired():
-                raise
-            state.metadata["agent_deadline_reached"] = True
-            return state
+        return await agent(state, generate)
 
-    return solve
+    return with_deadline(solve)

@@ -34,8 +34,8 @@ task:
         include_transcript: true
 
 solver:
-  # CLI: --solver inspect_swe/claude_code -S cwd=/home/agent/task -S user=root -S version=auto
-  # Swap claude_code for codex_cli, opencode, or gemini_cli; native CLIs can finish early.
+  # CLI: --solver inferencebench/cli_agent -S harness=claude_code
+  # harness_args passes native Inspect SWE options; continuation and budget reminders are shared.
   # In YAML, replace this whole solver block with the CLI name and its own args.
   solver: inferencebench/react_agent
   args:

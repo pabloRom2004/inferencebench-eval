@@ -1140,10 +1140,11 @@ def test_bound_judge_configuration(local_task, tmp_path):
     assert log.status == "success"
     events = [
         event
-        for event in log.samples[0].events
+        for event in read_eval_log(log.location, resolve_attachments=True).samples[0].events
         if event.event == "model" and event.model == "mockllm/alternate"
     ]
     assert events and all(event.config.temperature == 0.37 for event in events)
+    assert "InferenceBench Scenario A: Input heavy (prefill speed)" in events[0].input[0].text
     assert all(event.config.extra_body == {"test_marker": "judge"} for event in events)
     assert log.samples[0].scores["inference_speedup"].metadata["integrity_judge"] == {
         "model": "mockllm/alternate",
@@ -1381,8 +1382,9 @@ def test_replacement_cleanup_after_artifact_failure(local_task, monkeypatch):
     "config_defaults,override",
     [("default", None), ("original", None), ("default", False), ("original", True)],
 )
+@pytest.mark.parametrize("compacted", [False, True])
 def test_judge_transcript_toggle(
-    local_task, monkeypatch, tmp_path, config_defaults, override
+    local_task, monkeypatch, tmp_path, config_defaults, override, compacted
 ):
     """Exercise both configs and overrides through transcript export, actual file reads, and a mock judge."""
     environment = importlib.import_module("inferencebench.environment")
@@ -1403,6 +1405,11 @@ def test_judge_transcript_toggle(
         path = local_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
+
+    async def upload(local, remote):
+        """Transfer the streamed evidence while ignoring the fixture's synthetic evaluator archive."""
+        if remote.endswith("agent-transcript.json"):
+            await write_file(remote, Path(local).read_text())
 
     async def execute(command, **kwargs):
         """Run evidence reads and stale-file removal locally while substituting GPU-only infrastructure."""
@@ -1435,7 +1442,7 @@ def test_judge_transcript_toggle(
     local_path(launcher).write_text("launcher evidence")
     env.resource_id = "local-scoring-sandbox"
     env.restart = AsyncMock(return_value=env)
-    env.upload = AsyncMock()
+    env.upload = AsyncMock(side_effect=upload)
     env.write_file = AsyncMock(side_effect=write_file)
     env.exec.side_effect = execute
     monkeypatch.setattr(environment, "gpu_environment", lambda: env)
@@ -1455,9 +1462,21 @@ def test_judge_transcript_toggle(
             )
         ],
     )
+    @solver
+    def subject():
+        """Simulate context compaction after an observable model action."""
+        async def solve(state, generate):
+            """Keep the event record while replacing the active context with a summary."""
+            state = await generate(state)
+            if compacted:
+                from inspect_ai.model import ChatMessageUser
+                state.messages = [ChatMessageUser(content="Compacted context without the earlier evidence")]
+            return state
+        return solve
+
     [log] = inspect_eval(
         task,
-        solver=generate(),
+        solver=subject(),
         model=get_model(
             "mockllm/subject",
             custom_outputs=[
@@ -1488,9 +1507,11 @@ def test_judge_transcript_toggle(
     assert ("subject transcript evidence" in reads[1].result) is enabled
     assert local_path(transcript).exists() is enabled
     if enabled:
-        assert json.loads(local_path(transcript).read_text()) == [
+        evidence = json.loads(local_path(transcript).read_text())
+        assert evidence["messages"] == [
             message.model_dump(mode="json") for message in sample.messages
         ]
+        assert "subject transcript evidence" in json.dumps(evidence["events"])
     else:
         assert "No such file" in reads[1].result
         assert not any(

@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import anyio
+from inspect_ai.log import transcript
 from inspect_ai.model import ModelInfo, get_model, get_model_info, set_model_info
 from inspect_ai.solver import Solver, solver
 from inspect_ai.util import sandbox, store
@@ -223,15 +224,28 @@ async def restart_for_scoring(state, include_transcript: bool):
             30,
         )
         if include_transcript:
-            await env.write_file(
-                f"{REMOTE}/agent-transcript.json",
-                json.dumps(
-                    [message.model_dump(mode="json") for message in state.messages],
-                    indent=2,
-                ),
-            )
+            evidence = folder / "agent-transcript.json"
+            write_agent_transcript(evidence, state)
+            await env.upload(str(evidence), f"{REMOTE}/agent-transcript.json")
         return env
     except BaseException:
         with anyio.CancelScope(shield=True):
             await env.terminate()
         raise
+
+
+def write_agent_transcript(path: Path, state) -> None:
+    """Stream model outputs and tool results so the judge retains evidence removed by compaction."""
+    fields = {"event", "timestamp", "span_id", "model", "role", "output",
+              "function", "arguments", "result", "error"}
+    with path.open("w") as output:
+        output.write('{"events": [\n')
+        separator = ""
+        for event in transcript().events:
+            if event.event not in {"model", "tool"}:
+                continue
+            output.write(separator + event.model_dump_json(include=fields, indent=2))
+            separator = ",\n"
+        output.write('\n], "messages": ')
+        json.dump([m.model_dump(mode="json") for m in state.messages], output, indent=2)
+        output.write("}\n")

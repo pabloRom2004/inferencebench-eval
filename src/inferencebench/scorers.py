@@ -11,6 +11,7 @@ from inspect_ai.scorer import Score, Scorer, scorer
 from inspect_ai.tool import Tool, tool
 from inspect_ai.util import store
 
+from inferencebench.dataset import SCENARIOS
 from inferencebench.environment import REMOTE, checked_exec, restart_for_scoring
 from inferencebench.metrics import (
     aggregate_speedup,
@@ -102,7 +103,7 @@ async def judge_submission(
     prompt = (
         select_prompt(judge_prompt, "judge_prompt")
         .prompt.replace("{model}", state.metadata["base_model"])
-        .replace("{benchmark}", state.metadata["scenario"])
+        .replace("{benchmark}", SCENARIOS[state.metadata["scenario"]]["benchmark"])
     )
     prompt += "\n\n" + JUDGE_ADAPTER.prompt.format(remote=REMOTE)
     if include_transcript:

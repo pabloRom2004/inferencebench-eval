@@ -19,7 +19,7 @@ uv run modal token new  # Authenticate the default GPU provider
 
 > [!NOTE]
 >
-> Each attempt allocates one H100 on Modal or RunPod. GPU setup and inference incur cloud charges. Model-provider requests run locally; your provider API key is not sent to the GPU sandbox. See the [implementation guide](docs/implementation.md#switching-gpu-providers) for RunPod setup.
+> Each attempt allocates one H100 on Modal or RunPod. GPU setup and inference incur cloud charges. Model-provider requests run on the Inspect controller; your provider API key is not sent to the GPU sandbox. See the [implementation guide](docs/implementation.md#switching-gpu-providers) for RunPod setup.
 
 > [!NOTE]
 >
@@ -37,7 +37,7 @@ uv run inspect eval \
   --log-dir logs
 ```
 
-Or a provider CLI (claude_code, codex_cli, gemini_cli, opencode):
+Or a provider CLI (claude_code, codex_cli, gemini_cli, kimi_code, opencode):
 
 Use [default.yaml](src/inferencebench/run_configs/default.yaml) and replace its solver:
 
@@ -45,8 +45,9 @@ Use [default.yaml](src/inferencebench/run_configs/default.yaml) and replace its 
 uv run inspect eval \
   --run-config src/inferencebench/run_configs/default.yaml \
   --model provider/model \
-  --solver inspect_swe/codex_cli \
-  -S cwd=/home/agent/task -S user=root -S version=auto \
+  --solver inferencebench/cli_agent \
+  -S harness=claude_code \
+  -S 'harness_args={"version":"2.1.114","permission_mode":"bypassPermissions","retry_refusals":0}' \
   -T scenarios=A -T 'seed_pairs=[[21,1337]]' \
   --log-dir logs
 ```
@@ -65,7 +66,7 @@ uv run inspect eval \
 
 The original config gives each attempt two optimization hours and uses full request counts. It retains the original prompt and API-Claude harness variant; cloud sandboxes and caching make this a port, not an exact paper reproduction.
 
-ReAct keeps nudging until its token budget. Native CLIs can finish earlier; the original wrapper resumes them until its deadline.
+ReAct and `cli_agent` resume early completions until their token budget. The original wrapper resumes until its deadline. All use the same setup and final scorer.
 
 View results with `uv run inspect view --log-dir logs`.
 
@@ -73,7 +74,7 @@ View results with `uv run inspect view --log-dir logs`.
 
 Edit or copy one of the configs below and pass its path to `--run-config`. Override task arguments with `-T`, harness arguments with `-S`, and generation/evaluation settings with CLI flags, e.g. `--token-limit 5000000 --epochs 1`. Use `uv run inspect eval --help` for all options.
 
-To change benchmark prompt wording, edit the named `Prompt` objects in [prompts.py](src/inferencebench/prompts.py). Provider setup, cache preparation, validation, and fidelity details are in the [implementation guide](docs/implementation.md).
+To change benchmark prompt wording, edit the named `Prompt` objects in [prompts.py](src/inferencebench/prompts.py). Provider setup and cache preparation are in the [implementation guide](docs/implementation.md). The [fidelity review](docs/fidelity.md) traces the task, subject, judge, and differences from the paper.
 
 ## Parameters
 
@@ -91,10 +92,13 @@ Config: [default.yaml](src/inferencebench/run_configs/default.yaml) (recommended
 
 ### CLI
 
-Config: [default.yaml](src/inferencebench/run_configs/default.yaml), with `solver` replaced by an `inspect_swe` CLI.
+Config: [default.yaml](src/inferencebench/run_configs/default.yaml), with `solver.solver: inferencebench/cli_agent`.
 
-- `version`: CLI version; use `auto` or an explicit release.
-- `cwd`, `user`: `/home/agent/task`, `root`.
+- `harness`: native Inspect SWE factory, such as `claude_code`.
+- `harness_args`: native options, including `version`.
+- `nudge_prompt`, `token_budget_reminder`, `web_search_args`: same defaults as ReAct.
+
+The adapter supplies the task directory, root sandbox user, bridged search, and served-model context limits. Native multi-attempt scoring is disabled because final grading restarts the server. Direct `--solver inspect_swe/...` overrides remain supported but omit these shared policies.
 
 ### Original
 
@@ -155,6 +159,13 @@ The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring re
 Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailable integrity judgments remain unscored; infrastructure failures remain Inspect errors. Report incomplete runs with their completed, scored, and unscored attempt counts.
 
 ## Changelog
+
+### [13] - 2026-09-12
+
+- Standardize CLI adapters and continuation in `cli.py` and `reminders.py`, following ExploitBench.
+- Preserve model and tool evidence for the judge after context compaction and retain the full upstream scenario description.
+- Prevent background output from corrupting RunPod tool completion records.
+- Trace the paper and released implementation, including cache provenance and remaining differences.
 
 ### [12] - 2026-09-10
 

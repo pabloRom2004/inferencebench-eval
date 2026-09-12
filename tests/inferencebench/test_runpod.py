@@ -16,6 +16,7 @@ import httpx
 import pytest
 import yaml
 from inspect_ai import eval_async
+from inspect_ai.agent import as_solver
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import ModelOutput, get_model
 from inspect_ai.util import (
@@ -24,7 +25,7 @@ from inspect_ai.util import (
     SandboxEnvironmentLimits,
 )
 
-from inferencebench import inference_bench, react_agent
+from inferencebench import cli_agent, inference_bench, react_agent
 from inferencebench.prompts import ASSETS
 from inferencebench.runpod_sandbox import RunPodSandbox
 
@@ -559,7 +560,8 @@ else:
         await docker("image", "rm", image)
 
 
-async def test_linux_transport_and_mock_evaluation(docker_pods, monkeypatch, tmp_path):
+@pytest.mark.parametrize("harness", ["react", "claude_code"])
+async def test_linux_transport_and_mock_evaluation(docker_pods, monkeypatch, tmp_path, harness):
     """Run real SSH tools, persisted root edits, a clean restart, and the real Inspect scorer on a CPU fixture."""
     [environments] = [await RunPodSandbox.sample_init("transport-test", None, {})]
     env = environments["default"]
@@ -634,10 +636,12 @@ sha256sum -c /tmp/capacity.sha256
             assert result.stderr.endswith("stderr-tail")
             noise = "import os; exec(\"while True: os.write(1, b'x'*65536)\")"
             command = f"python3 -c {shlex.quote(noise)} &\nsleep 0.05; printf diagnostic >&2; exit 3"
-            result = await asyncio.wait_for(env.exec(["bash", "-c", command]), timeout=5)
-            assert result.returncode == 3
-            assert len(result.stdout) <= 1024
-            assert result.stderr == "diagnostic"
+            # Exercise interleaving between a noisy descendant and the shell exit record.
+            for _ in range(20):
+                result = await asyncio.wait_for(env.exec(["bash", "-c", command]), timeout=5)
+                assert result.returncode == 3
+                assert len(result.stdout) <= 1024
+                assert result.stderr == "diagnostic"
     finally:
         await RunPodSandbox.sample_cleanup("transport-test", None, environments, False)
     assert not docker_pods.pods
@@ -650,7 +654,13 @@ sha256sum -c /tmp/capacity.sha256
         request_limit=1,
         quality_samples=16, quality_cache=None,
     )
-    task.solver = react_agent(nudge_prompt=False, token_budget_reminder=False)
+    task.solver = (
+        react_agent(nudge_prompt=False, token_budget_reminder=False)
+        if harness == "react" else as_solver(cli_agent(
+            "claude_code", {"version": "2.1.114", "permission_mode": "bypassPermissions", "retry_refusals": 0},
+            nudge_prompt=False, token_budget_reminder=False,
+        ))
+    )
     command = """printf preserved > /usr/local/lib/agent-change
 ln /usr/local/lib/agent-change /usr/local/lib/agent-hardlink
 ln -s agent-change /usr/local/lib/agent-symlink
@@ -669,7 +679,7 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
     subject = get_model(
         "mockllm/subject",
         custom_outputs=[
-            ModelOutput.for_tool_call("mockllm/subject", "bash", {"command": command}),
+            ModelOutput.for_tool_call("mockllm/subject", "bash" if harness == "react" else "Bash", {"command": command}),
             ModelOutput.from_content("mockllm/subject", "Ready"),
         ],
     )

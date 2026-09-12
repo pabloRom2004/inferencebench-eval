@@ -372,9 +372,11 @@ class RunPodSandbox(SandboxEnvironment):
         # Background descendants can retain SSH pipes after the command exits.
         marker = "\nINFERENCEBENCH_EXIT_" + uuid.uuid4().hex + ":"
         script = shlex.join(command) + "; inferencebench_status=$?; "
+        # Coreutils buffers each record into one pipe write; bash printf can interleave
+        # its marker, status, and newline with a noisy background descendant.
         for destination in ["", " >&2"]:
             script += (
-                "printf '%s%d\\n' " + shlex.quote(marker)
+                "/usr/bin/printf '%s%d\\n' " + shlex.quote(marker)
                 + ' "$inferencebench_status"' + destination + "; "
             )
         command = ["bash", "-c", script + 'exit "$inferencebench_status"']
