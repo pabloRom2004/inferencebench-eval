@@ -1573,7 +1573,8 @@ def test_invalid_transcript_toggle(value):
         SCORERS.inference_speedup(**{**args, "include_transcript": value})
 
 
-def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path):
+@pytest.mark.parametrize("failure", ["solver", "connection"])
+def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path, failure):
     """Keep an unfinished launcher and model evidence when the agent fails before scoring."""
     import io
     import tarfile
@@ -1603,6 +1604,22 @@ def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path):
     def broken_agent():
         async def solve(state, generate):
             await generate(state)
+            if failure == "connection":
+                import asyncssh
+                from asyncssh.misc import async_context_manager
+                from inspect_ai.util._sandbox.events import SandboxEnvironmentProxy
+
+                from inferencebench.runpod_sandbox import RunPodSandbox
+
+                config = load_config("runpod.yaml")
+                config["poll_interval_seconds"] = 0
+                provider = RunPodSandbox(config)
+                @async_context_manager
+                async def failed_connect(*args, **kwargs):
+                    raise TimeoutError()
+
+                monkeypatch.setattr(asyncssh, "connect", failed_connect)
+                await SandboxEnvironmentProxy(provider).exec(["true"])
             raise RuntimeError("native agent died")
         return solve
 
@@ -1610,7 +1627,7 @@ def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path):
                         display="none", log_dir="logs")
     assert log.status == "error"
     sample = read_eval_log(log.location).samples[0]
-    assert "native agent died" in sample.error.message
+    assert ("native agent died" if failure == "solver" else "SSH connection failed") in sample.error.message
     assert not sample.scores
     fs, path = environment.url_to_fs(f"{destination}/artifacts/{sample.uuid}")
     with tarfile.open(fileobj=io.BytesIO(fs.cat(f"{path}/submission.tar.gz"))) as archive:

@@ -21,6 +21,7 @@ api_url: https://rest.runpod.io/v1
 
 api_timeout_seconds: 30
 
+# Bounds idempotent API requests and SSH connection establishment.
 api_retry_attempts: 3
 
 ssh_keepalive_interval_seconds: 30

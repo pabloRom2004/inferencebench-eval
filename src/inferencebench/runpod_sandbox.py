@@ -89,19 +89,31 @@ class RunPodSandbox(SandboxEnvironment):
         record.update(name=self.name, pod_id=self.pod_id, status=status, **details)
         path.write_text(json.dumps(record, indent=2))
 
-    def _connect(self):
-        """Authenticate with ephemeral client keys and verify the host key installed at pod creation."""
-        return asyncssh.connect(
-            self.host,
-            port=self.port,
-            username="root",
-            client_keys=[self.key],
-            agent_path=None,
-            known_hosts=([self.host_key.convert_to_public()], [], []),
-            connect_timeout=self.config["api_timeout_seconds"],
-            keepalive_interval=self.config["ssh_keepalive_interval_seconds"],
-            keepalive_count_max=self.config["ssh_keepalive_count_max"],
-        )
+    @asynccontextmanager
+    async def _connect(self):
+        """Retry connection failures before sending any command; never replay remote work."""
+        for attempt in range(self.config["api_retry_attempts"]):
+            try:
+                connection = await asyncssh.connect(
+                    self.host,
+                    port=self.port,
+                    username="root",
+                    client_keys=[self.key],
+                    agent_path=None,
+                    known_hosts=([self.host_key.convert_to_public()], [], []),
+                    connect_timeout=self.config["api_timeout_seconds"],
+                    keepalive_interval=self.config["ssh_keepalive_interval_seconds"],
+                    keepalive_count_max=self.config["ssh_keepalive_count_max"],
+                )
+                break
+            except (OSError, asyncssh.ConnectionLost) as error:
+                if attempt + 1 == self.config["api_retry_attempts"]:
+                    raise SandboxUnavailableError(
+                        f"RunPod SSH connection failed for {self.pod_id}: {type(error).__name__}: {error}"
+                    ) from error
+                await asyncio.sleep(self.config["poll_interval_seconds"])
+        async with connection:
+            yield connection
 
     async def connection(self, *, user: str | None = None) -> SandboxConnection:
         """Expose a pinned SSH command for live debugging, keeping its private key outside the repository."""
@@ -447,12 +459,10 @@ class RunPodSandbox(SandboxEnvironment):
     async def _sftp(self):
         """Open an authenticated file channel and preserve Inspect's file-error semantics."""
         try:
-            async with asyncio.timeout(self.config["api_timeout_seconds"]):
-                async with (
-                    self._connect() as connection,
-                    connection.start_sftp_client() as sftp,
-                ):
-                    yield sftp
+            async with self._connect() as connection:
+                async with asyncio.timeout(self.config["api_timeout_seconds"]):
+                    async with connection.start_sftp_client() as sftp:
+                        yield sftp
         except asyncssh.SFTPNoSuchFile as error:
             raise FileNotFoundError(str(error)) from error
         except asyncssh.SFTPPermissionDenied as error:

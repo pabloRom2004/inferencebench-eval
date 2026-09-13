@@ -15,6 +15,7 @@ import asyncssh
 import httpx
 import pytest
 import yaml
+from asyncssh.misc import async_context_manager
 from inspect_ai import eval_async
 from inspect_ai.agent import as_solver
 from inspect_ai.log import read_eval_log
@@ -23,6 +24,7 @@ from inspect_ai.util import (
     ExecResult,
     OutputLimitExceededError,
     SandboxEnvironmentLimits,
+    SandboxUnavailableError,
 )
 
 from inferencebench import cli_agent, inference_bench, react_agent
@@ -62,6 +64,48 @@ def test_provider_selection():
     assert task.dataset[0].metadata["gpu_provider"] == "runpod"
     with pytest.raises(ValueError, match="gpu_provider"):
         inference_bench(gpu_provider="unknown")
+
+
+@pytest.mark.parametrize("failures", [1, 3])
+async def test_connect_timeout_retries(provider, monkeypatch, failures):
+    """Recover a failed handshake or report unavailability after the configured bound."""
+    connection = AsyncMock()
+    connect = AsyncMock(side_effect=[*[TimeoutError()] * failures, connection])
+    @async_context_manager
+    async def connect_context(*args, **kwargs):
+        return await connect(*args, **kwargs)
+
+    monkeypatch.setattr(asyncssh, "connect", connect_context)
+    if failures == 3:
+        with pytest.raises(SandboxUnavailableError, match="test-pod: TimeoutError"):
+            async with provider._connect():
+                pytest.fail("A command cannot start without a connection")
+    else:
+        async with provider._connect() as actual:
+            assert actual is connection
+        connection.__aexit__.assert_awaited_once()
+    assert connect.await_count == min(failures + 1, 3)
+
+
+async def test_connect_never_replays_command_or_auth_failure(provider, monkeypatch):
+    """Do not retry after yielding a connection, or when the pinned identity is rejected."""
+    connection = AsyncMock()
+    connect = AsyncMock(return_value=connection)
+    @async_context_manager
+    async def connect_context(*args, **kwargs):
+        return await connect(*args, **kwargs)
+
+    monkeypatch.setattr(asyncssh, "connect", connect_context)
+    with pytest.raises(TimeoutError, match="command already started"):
+        async with provider._connect():
+            raise TimeoutError("command already started")
+    connect.assert_awaited_once()
+    connect.reset_mock(side_effect=True)
+    connect.side_effect = asyncssh.HostKeyNotVerifiable("wrong host")
+    with pytest.raises(asyncssh.HostKeyNotVerifiable):
+        async with provider._connect():
+            pytest.fail("Wrong host must not be accepted")
+    connect.assert_awaited_once()
 
 
 @pytest.mark.parametrize("keepalive", [False, True])
@@ -694,6 +738,29 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
             )
         ],
     )
+    connect = asyncssh.connect
+    execute = RunPodSandbox.exec
+    injected = False
+    fail_connection = False
+
+    @async_context_manager
+    async def interrupted_connect(*args, **kwargs):
+        """Lose one native CLI poll's SSH handshake before any remote command is sent."""
+        nonlocal fail_connection
+        if fail_connection:
+            fail_connection = False
+            raise TimeoutError()
+        return await connect(*args, **kwargs)
+
+    async def poll_with_disconnect(self, *args, **kwargs):
+        """Inject the observed failure through the genuine Inspect remote-process path."""
+        nonlocal injected, fail_connection
+        if not injected and "exec_remote_poll" in str(kwargs.get("input", "")):
+            injected = fail_connection = True
+        return await execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncssh, "connect", interrupted_connect)
+    monkeypatch.setattr(RunPodSandbox, "exec", poll_with_disconnect)
     [log] = await eval_async(
         task,
         model=subject,
@@ -702,6 +769,7 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
     )
     assert log.status == "success", log.error
     if harness == "claude_code":
+        assert injected
         sample = read_eval_log(log.location, resolve_attachments=True).samples[0]
         assert any(
             "Kernel Optimization" in message.text
