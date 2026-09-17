@@ -33,6 +33,7 @@ def inference_bench(
     # Workload and optimization budget.
     base_model:              str = DEFAULT_TASK_ARGS["base_model"],
     max_model_len:           int = DEFAULT_TASK_ARGS["max_model_len"],
+    baseline_dtype:          str = DEFAULT_TASK_ARGS["baseline_dtype"],
     context_length:          int | None = DEFAULT_TASK_ARGS["context_length"],
     agent_seconds:           int | None = DEFAULT_TASK_ARGS["agent_seconds"],
     request_limit:           int | None = DEFAULT_TASK_ARGS["request_limit"],
@@ -51,7 +52,7 @@ def inference_bench(
     strict_prompt:           bool = DEFAULT_TASK_ARGS["strict_prompt"],
     scorer:                  dict[str, Any] = DEFAULT_TASK_ARGS["scorer"],
 ) -> Task:
-    """Optimize Mistral inference for four workloads on one H100 using the original evaluator."""
+    """Optimize the configured base model's inference for four workloads on one H100 using the original evaluator."""
     if config_defaults not in {"default", "original"}:
         raise ValueError("config_defaults must be default or original")
     if gpu_provider not in {"modal", "runpod"}:
@@ -78,6 +79,8 @@ def inference_bench(
         raise ValueError("quality_reference_backend must be transformers or vllm")
     if type(strict_prompt) is not bool:
         raise ValueError("strict_prompt must be a boolean")
+    if baseline_dtype not in {"float16", "bfloat16", "float32"}:
+        raise ValueError("baseline_dtype must be float16, bfloat16, or float32")
     durations = [server_wait_seconds, request_timeout_seconds]
     if agent_seconds is not None:
         durations.append(agent_seconds)

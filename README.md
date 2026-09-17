@@ -117,7 +117,8 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `scenarios`: ID or list; `A`, original `null` selects A–D.
 - `seed_pairs`: development/evaluation seeds; `[[21,1337]]`, original three pairs.
 - `gpu_provider`: `modal` or `runpod`; `modal`.
-- `base_model`: `mistralai/Mistral-7B-Instruct-v0.3`.
+- `base_model`: `mistralai/Mistral-7B-Instruct-v0.3`. Any Hugging Face checkpoint the evaluator's Transformers stack can load; see the [implementation guide](docs/implementation.md#changing-the-base-model).
+- `baseline_dtype`: precision of the Transformers speed baseline and the reference server; `float16` (upstream). Use `bfloat16` for bf16-native models.
 - `context_length`: optimizing model's context window; `null` uses Inspect's metadata. Set `1048576` for DeepSeek V4.1 Flash.
 - `strict_prompt`: insert the leaderboard's strict rules (no third-party pre-quantized checkpoints, no modifying the evaluation harness) after the base-model constraint; `true`. The paper's Table 2 used the plain prompt; the site's dagger-marked rows used a strict prompt whose text is unreleased, so the wording is the port's.
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
@@ -167,6 +168,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 - Add `quality_reference_backend`: the default measures the reference with a pinned vLLM 0.19.0 server; `original.yaml` keeps the Transformers server.
 - Give both configs the released judge's inline evidence and shell access (`preload_evidence`, `judge_shell`) and export the transcript in both; `transcript_hint` mentions it only in the default prompt.
 - Add `strict_prompt` (default `true` in both configs), inserting the leaderboard's strict rules after the base-model constraint.
+- Add `baseline_dtype`, and write the configured model into the launcher fallback, login shells, and CLI environment so no image default names Mistral.
 
 ### [13] - 2026-09-12
 

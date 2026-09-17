@@ -71,6 +71,9 @@ def local_task(monkeypatch, tmp_path):
                 "deadline", time.time() + seconds if seconds is not None else None
             )
             store().set("artifacts", str(tmp_path))
+            from inferencebench.environment import workspace_env
+
+            store().set("workspace_env", workspace_env(state.metadata))
             (tmp_path / "baseline.json").write_text(json.dumps(measurements()))
             state.metadata["prepared"] = True
             return state
@@ -292,6 +295,7 @@ def test_development_wrapper_request_selection(monkeypatch, tmp_path, use_cache)
         (context / name).touch()
     monkeypatch.setattr(runtime, "ROOT", tmp_path)
     monkeypatch.setattr(runtime, "TASK", tmp_path)
+    monkeypatch.setattr(runtime, "PROFILE", tmp_path / "profile.d" / "inferencebench.sh")
     monkeypatch.setattr(sys, "argv", ["evaluate.py"])
     observed = []
 
@@ -700,6 +704,7 @@ def test_registered_yaml_solver(local_task, monkeypatch, tmp_path):
         {"quality_tau": True},
         {"quality_reference_backend": "sglang"},
         {"strict_prompt": "yes"},
+        {"baseline_dtype": "int8"},
     ],
 )
 def test_invalid_workload_arguments(options):
@@ -1750,16 +1755,20 @@ def test_quality_reference_backend_server_order(monkeypatch, tmp_path, backend):
     monkeypatch.setattr(runtime, "prepare_quality_baseline", Mock(side_effect=lambda options, spec: events.append("quality")))
     monkeypatch.setattr(runtime.subprocess, "check_output", Mock(return_value="0.19.0\n"))
 
+    commands = []
+
     def popen(command, **kwargs):
         """Record each server launch as a live process."""
         events.append(("start", command[0], command[1]))
+        commands.append(command)
         return Mock(pid=len(events), poll=Mock(return_value=None), wait=Mock())
 
     monkeypatch.setattr(runtime.subprocess, "Popen", popen)
     monkeypatch.setattr(runtime.os, "killpg", Mock(side_effect=lambda pid, sig: events.append("stop")))
 
-    options = inference_bench(request_cache=None, quality_reference_backend=backend).dataset[0].metadata
+    options = inference_bench(request_cache=None, quality_reference_backend=backend, baseline_dtype="bfloat16").dataset[0].metadata
     runtime.prepare(options)
+    assert all(command[command.index("--dtype") + 1] == "bfloat16" for command in commands)
 
     transformers = ("start", "python3", str(runtime.ROOT / "src/eval/inference/servers/transformers_openai_server.py"))
     vllm = ("start", "/opt/reference/bin/vllm", "serve")
@@ -1788,3 +1797,29 @@ def test_strict_prompt_toggle(config_defaults, strict):
         assert text.replace(PROMPTS["strict_rules"].prompt.replace("{model}", "mistralai/Mistral-7B-Instruct-v0.3") + "\n", "") == inference_bench(
             **{**args, "scenarios": "A", "seed_pairs": [[21, 1337]], "strict_prompt": False}
         ).dataset[0].input
+
+
+def test_workspace_names_the_configured_model(monkeypatch, tmp_path):
+    """Rewrite the launcher fallback and export the served model for login shells when the base model changes."""
+    from inferencebench.assets.scripts import runtime
+
+    root = tmp_path / "root"
+    context = root / "src/eval/tasks/_shared/task_context"
+    context.mkdir(parents=True)
+    (context / "start_server.sh").write_text(
+        'MODEL_ID="${INFERENCE_BENCH_BASE_MODEL:-mistralai/Mistral-7B-Instruct-v0.3}"\necho "$MODEL_ID"\n'
+    )
+    (context / "test_server.sh").write_text("#!/bin/bash\n")
+    task = tmp_path / "task"
+    task.mkdir()
+    monkeypatch.setattr(runtime, "ROOT", root)
+    monkeypatch.setattr(runtime, "TASK", task)
+    monkeypatch.setattr(runtime, "PROFILE", tmp_path / "profile.d" / "inferencebench.sh")
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    options = inference_bench(request_cache=None, base_model="org/other model", max_model_len=8192).dataset[0].metadata
+    runtime.install_workspace(options)
+    assert (task / "start_server.sh").read_text().startswith('MODEL_ID="${INFERENCE_BENCH_BASE_MODEL:-org/other model}"')
+    assert (tmp_path / "profile.d" / "inferencebench.sh").read_text() == (
+        "export INFERENCE_BENCH_BASE_MODEL='org/other model'\nexport INFERENCE_BENCH_MAX_MODEL_LEN=8192\n"
+    )
+    assert "'INFERENCE_BENCH_BASE_MODEL': 'org/other model'" in (task / "evaluate.py").read_text()

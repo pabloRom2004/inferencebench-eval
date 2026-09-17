@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -20,6 +21,8 @@ ROOT = Path("/opt/inferencebench")
 TASK = Path("/home/agent/task")
 ARTIFACTS = Path("/tmp/inferencebench")
 REFERENCE_BIN = Path("/opt/reference/bin")
+# Login shells (Inspect's bash tool) source this, overriding the image's static defaults.
+PROFILE = Path("/etc/profile.d/inferencebench.sh")
 sys.path.insert(0, str(ROOT / "src/eval"))
 
 
@@ -217,7 +220,7 @@ def serve(command, log_name, description, options):
 
 @contextmanager
 def baseline_server(options):
-    """Run the original float16 Transformers server for the speed baseline and the original quality reference."""
+    """Run the original Transformers server for the speed baseline and the original quality reference."""
     command = [
         "python3",
         str(ROOT / "src/eval/inference/servers/transformers_openai_server.py"),
@@ -226,7 +229,7 @@ def baseline_server(options):
         "--port",
         "8000",
         "--dtype",
-        "float16",
+        options["baseline_dtype"],
         "--max-model-len",
         str(options["max_model_len"]),
     ]
@@ -236,7 +239,7 @@ def baseline_server(options):
 
 @contextmanager
 def reference_server(options):
-    """Serve the same float16 checkpoint through the pinned vLLM environment for a faster quality reference."""
+    """Serve the same checkpoint at the baseline precision through the pinned vLLM environment for a faster quality reference."""
     version = subprocess.check_output(
         [str(REFERENCE_BIN / "python"), "-c", "import vllm; print(vllm.__version__)"], text=True
     ).strip()
@@ -249,7 +252,7 @@ def reference_server(options):
         "--port",
         "8000",
         "--dtype",
-        "float16",
+        options["baseline_dtype"],
         "--max-model-len",
         str(options["max_model_len"]),
     ]
@@ -332,6 +335,18 @@ def install_workspace(options):
     for name in ["start_server.sh", "test_server.sh"]:
         shutil.copy(context / name, TASK / name)
         (TASK / name).chmod(0o755)
+
+    # Point the empty launcher's fallback and every login shell at the configured model.
+    launcher = TASK / "start_server.sh"
+    launcher.write_text(launcher.read_text().replace(
+        "${INFERENCE_BENCH_BASE_MODEL:-mistralai/Mistral-7B-Instruct-v0.3}",
+        "${INFERENCE_BENCH_BASE_MODEL:-" + options["base_model"] + "}",
+    ))
+    PROFILE.parent.mkdir(parents=True, exist_ok=True)
+    PROFILE.write_text(
+        f"export INFERENCE_BENCH_BASE_MODEL={shlex.quote(options['base_model'])}\n"
+        f"export INFERENCE_BENCH_MAX_MODEL_LEN={options['max_model_len']}\n"
+    )
 
     # Development tests can override these defaults through the environment.
     env = environment(options)

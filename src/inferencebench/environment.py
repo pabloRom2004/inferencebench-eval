@@ -54,6 +54,14 @@ def gpu_environment() -> InferenceSandbox | RunPodSandbox:
         return env.as_type(RunPodSandbox)
 
 
+def workspace_env(options: dict) -> dict[str, str]:
+    """Name the served model and context for the agent's shells, overriding the image's static defaults."""
+    return {
+        "INFERENCE_BENCH_BASE_MODEL": options["base_model"],
+        "INFERENCE_BENCH_MAX_MODEL_LEN": str(options["max_model_len"]),
+    }
+
+
 async def checked_exec(env, command: list[str], timeout: int) -> str:
     """Execute harness infrastructure and raise on failure instead of assigning the subject a score."""
     result = await env.exec(command, timeout=timeout, timeout_retry=False)
@@ -84,6 +92,7 @@ def prepare_environment() -> Solver:
         )
         folder.mkdir(parents=True)
         store().set("artifacts", str(folder.resolve()))
+        store().set("workspace_env", workspace_env(state.metadata))
 
         # Record the GPU allocated to this sample.
         state.metadata["agent_sandbox_id"] = env.resource_id

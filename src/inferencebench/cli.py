@@ -8,7 +8,7 @@ import inspect_swe
 from inspect_ai.agent import Agent, AgentState, BridgedToolsSpec, agent
 from inspect_ai.model import ChatMessageUser, GenerateInput, get_model, get_model_info
 from inspect_ai.model._generate_config import active_generate_config
-from inspect_ai.util import sandbox
+from inspect_ai.util import sandbox, store
 
 from inferencebench.reminders import cli_reminders, nudge, with_deadline
 from inferencebench.run_config import load_config
@@ -104,7 +104,8 @@ def context_args(harness: str, args: dict[str, Any]) -> dict[str, Any]:
     info = get_model_info(model)
     context = info.context_length if info else None
     output = model.config.merge(active_generate_config()).max_tokens
-    env = dict(args.get("env") or {})
+    # Preparation records the served model for the sandbox; explicit harness env wins.
+    env = {**(store().get("workspace_env") or {}), **(args.get("env") or {})}
     if harness == "claude_code":
         if context:
             env.setdefault("CLAUDE_CODE_MAX_CONTEXT_TOKENS", str(context))

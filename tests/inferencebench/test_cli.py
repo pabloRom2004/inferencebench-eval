@@ -98,6 +98,8 @@ def test_cli_continuation_and_scoring(local_task, monkeypatch, harness, continue
     env.terminate.assert_awaited_once()
     if harness == "claude_code":
         assert observed[0]["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "1048576"
+        assert observed[0]["env"]["INFERENCE_BENCH_BASE_MODEL"] == "mistralai/Mistral-7B-Instruct-v0.3"
+        assert observed[0]["env"]["INFERENCE_BENCH_MAX_MODEL_LEN"] == "32768"
         assert "Kernel Optimization" in env.write_file.await_args_list[0].args[1]
         assert all("start_server.sh" not in request.input[-1].text for request in requests)
 
