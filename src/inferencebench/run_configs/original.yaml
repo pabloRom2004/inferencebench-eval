@@ -24,7 +24,7 @@ task:
     quality_reference_backend: transformers
     quality_tau: 0.95
     quality_concurrency: 4
-    quality_baseline_max_attempts: 1
+    quality_baseline_max_attempts: 2
     server_wait_seconds: 900
     request_timeout_seconds: 300
     scorer:

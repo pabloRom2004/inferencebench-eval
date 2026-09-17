@@ -129,7 +129,7 @@ class RunPodSandbox(SandboxEnvironment):
         """Expose a pinned SSH command for live debugging, keeping its private key outside the repository."""
         if not self.host or not self.port:
             raise ConnectionError("RunPod SSH is not ready")
-        if self.ssh_folder is None:
+        if self.ssh_folder is None or not Path(self.ssh_folder.name).is_dir():
             self.ssh_folder = tempfile.TemporaryDirectory(prefix="inferencebench-ssh-")
         folder = Path(self.ssh_folder.name)
         key = folder / "id_ed25519"
@@ -349,8 +349,12 @@ class RunPodSandbox(SandboxEnvironment):
             try:
                 self._record("terminated")
             finally:
+                # Later connection queries must report the pod gone rather than touch removed files.
                 if self.ssh_folder is not None:
                     self.ssh_folder.cleanup()
+                self.ssh_folder = None
+                self.host = None
+                self.port = None
 
     async def restart(self, config_file: str | None) -> "RunPodSandbox":
         """Snapshot the installed filesystem to the volume and reboot the pod before grading."""

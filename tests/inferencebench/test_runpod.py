@@ -865,3 +865,15 @@ async def test_pod_creation_never_replays_uncertain_requests(provider, monkeypat
     with pytest.raises(error):
         await provider._create_pod({"name": provider.name})
     assert calls == {"client_error": ["POST"], "exhausted": ["POST", "GET", "POST"], "lost_response": ["POST"]}[outcome]
+
+
+async def test_connection_query_after_termination_is_unavailable(provider, monkeypatch):
+    """Report a released pod as unavailable instead of writing into its removed key folder."""
+    provider.host, provider.port = "203.0.113.5", 2222
+    monkeypatch.setattr(provider, "_request", AsyncMock(return_value=None))
+    folder = Path((await provider.connection()).command.split(" -i ")[1].split(" ")[0]).parent
+    assert folder.is_dir()
+    await provider.terminate()
+    assert not folder.exists()
+    with pytest.raises(ConnectionError):
+        await provider.connection()

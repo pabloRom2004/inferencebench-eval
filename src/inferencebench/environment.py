@@ -83,6 +83,24 @@ def store_speed_baseline(identity: dict[str, Any], sample_folder: Path, provenan
     return folder
 
 
+async def retain_speed_baseline(env, folder: Path, identity: dict[str, Any], provenance: dict[str, Any]) -> Path | None:
+    """Download a completed speed measurement from the sandbox and publish it for later samples."""
+    for name in SPEED_BASELINE_FILES:
+        try:
+            await env.download(f"{REMOTE}/{name}", str(folder / name))
+        except Exception:
+            return None
+    try:
+        await env.download(f"{REMOTE}/baseline-generations.jsonl", str(folder / "baseline-generations.jsonl"))
+    except Exception as error:
+        (folder / "baseline-generations-copy-error.txt").write_text(repr(error))
+    try:
+        revision = json.loads(await env.read_file(f"{REMOTE}/provenance.json")).get("downloaded_model_revision")
+    except Exception:
+        revision = None
+    return store_speed_baseline(identity, folder, {**provenance, "downloaded_model_revision": revision})
+
+
 @hooks(name="inferencebench_artifacts", description="Retain InferenceBench submissions and measurements on Hawk")
 class HawkArtifacts(Hooks):
     """Use Hawk's per-sample artifact tree without changing local log placement."""
@@ -217,6 +235,16 @@ def prepare_environment() -> Solver:
                         (folder / "quality-baseline-copy-error.txt").write_text(archive.stderr)
                 except Exception as error:
                     (folder / "quality-baseline-copy-error.txt").write_text(repr(error))
+                # A completed speed measurement is reusable even when the reference fails afterwards.
+                if cached is None:
+                    try:
+                        cached = await retain_speed_baseline(env, folder, identity, {
+                            "gpu_inventory": inventory,
+                            "provider": state.metadata["gpu_provider"],
+                            "sample": folder.name,
+                        })
+                    except Exception as error:
+                        (folder / "speed-baseline-store-error.txt").write_text(repr(error))
         (folder / "prepare.log").write_text(output)
 
         # Keep trusted scoring inputs outside the agent sandbox.
@@ -232,17 +260,6 @@ def prepare_environment() -> Solver:
         state.metadata["provenance"] = json.loads(
             (folder / "provenance.json").read_text()
         )
-        if cached is None:
-            try:
-                await env.download(f"{REMOTE}/baseline-generations.jsonl", str(folder / "baseline-generations.jsonl"))
-            except Exception as error:
-                (folder / "baseline-generations-copy-error.txt").write_text(repr(error))
-            cached = store_speed_baseline(identity, folder, {
-                "gpu_inventory": inventory,
-                "downloaded_model_revision": state.metadata["provenance"].get("downloaded_model_revision"),
-                "provider": state.metadata["gpu_provider"],
-                "sample": folder.name,
-            })
         state.metadata["speed_baseline"] = {
             "source": "cache" if state.metadata["cached_speed_baseline"] else "measured",
             "folder": str(cached.resolve()) if cached is not None else None,

@@ -1948,3 +1948,70 @@ def test_prepare_requests_restores_dropped_boundary_token(monkeypatch):
     assert runner._truncate_messages is truncate
     with pytest.raises(RuntimeError, match="outside input range"):
         prepare(config, 1, None, 32768)
+
+
+def test_prepare_failure_retains_measured_speed_baseline(monkeypatch, tmp_path):
+    """Store a completed speed measurement when the reference fails afterwards, so the retry skips it."""
+    environment = importlib.import_module("inferencebench.environment")
+    monkeypatch.setattr(environment, "BASELINE_CACHE", tmp_path / "baselines")
+    written, uploads, outcomes = {}, [], ["fail", "pass"]
+
+    async def execute(command, **kwargs):
+        """Fail the first preparation after its speed measurement, then succeed."""
+        if command[0] == "nvidia-smi":
+            return ExecResult(success=True, returncode=0, stdout="name, memory.total [MiB], driver_version\nNVIDIA H100 80GB HBM3, 81559 MiB, 580.95.05\n", stderr="")
+        if "prepare" in command and outcomes.pop(0) == "fail":
+            return ExecResult(success=False, returncode=1, stdout="", stderr="Transformers quality baseline did not complete every request")
+        return ExecResult(success=True, returncode=0, stdout="", stderr="")
+
+    async def read_file(path):
+        """Serve preparation outputs; provenance exists only once preparation completes."""
+        name = path.rsplit("/", 1)[-1]
+        if name == "final.json":
+            return json.dumps(measurements(2))
+        if name == "baseline.json":
+            return json.dumps(measurements())
+        if name == "provenance.json":
+            if outcomes:
+                raise FileNotFoundError(path)
+            return json.dumps({"downloaded_model_revision": "rev", "input_sha256": {}})
+        if name == "heldout-requests.jsonl":
+            return '{"messages": []}\n'
+        return "{}"
+
+    async def write_file(path, content):
+        """Capture the options handed to the sandbox runtime."""
+        if path.endswith("options.json"):
+            written["options"] = content
+
+    async def upload(local, remote):
+        """Record which shared files reach the sandbox."""
+        uploads.append(Path(local).name)
+
+    async def download(remote, local):
+        """Materialise the measured files locally."""
+        Path(local).write_text("x")
+
+    env = SimpleNamespace(resource_id="pod", exec=execute, read_file=read_file, write_file=write_file, upload=upload, download=download, terminate=AsyncMock())
+    monkeypatch.setattr(environment, "gpu_environment", lambda: env)
+    monkeypatch.setattr(SCORERS, "restart_for_scoring", AsyncMock(return_value=env))
+
+    def run():
+        """Run one sample through the real preparation solver."""
+        task = inference_bench(scenarios="A", seed_pairs=[[21, 1337]], agent_seconds=2)
+        task.sandbox = None
+        [log] = inspect_eval(task, solver=generate(), model="mockllm/subject", model_roles={"integrity": judge_model()}, display="none", log_dir="logs")
+        return log
+
+    failed = run()
+    assert failed.status == "error" and "did not complete every request" in failed.error.message
+    [stored] = list((tmp_path / "baselines").iterdir())
+    manifest = json.loads((stored / "manifest.json").read_text())
+    assert manifest["downloaded_model_revision"] is None and manifest["identity"]["scenario"] == "A"
+    assert (stored / "baseline.json").exists() and (stored / "heldout-requests.jsonl").exists()
+
+    passed = run()
+    assert passed.status == "success", passed.error
+    assert json.loads(written["options"])["cached_speed_baseline"] is True
+    assert sorted(uploads) == ["baseline.json", "heldout-requests.jsonl"]
+    assert passed.samples[0].metadata["speed_baseline"]["source"] == "cache"
