@@ -1615,6 +1615,7 @@ def test_original_judge_evidence_and_shell(local_task, monkeypatch, missing_laun
     assert isinstance(initial.input[0], ChatMessageUser)
     evidence = text.index("# Pre-loaded File Evidence")
     assert evidence < text.index("Inspect adapter:") and "The following files were found in the task directory. Use them as primary evidence for your judgement." in text
+    assert "final-server.log" not in text and "relevant source" not in text
     assert ("## Contents of `start_server.sh`\n```\nlauncher evidence\n```" in text) is not missing_launcher
     assert "## Contents of `server.log`\n```\n[...truncated 50 lines...]\nserver line 51\n" in text
     assert "server line 50\n" not in text and text.rstrip().count("server line 250") == 1

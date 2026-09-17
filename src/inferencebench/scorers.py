@@ -21,6 +21,7 @@ from inferencebench.metrics import (
 )
 from inferencebench.prompts import (
     JUDGE_ADAPTER,
+    JUDGE_ADAPTER_ORIGINAL,
     JUDGE_SHELL,
     JUDGE_TRANSCRIPT,
     select_prompt,
@@ -167,7 +168,8 @@ async def judge_submission(
     if preload_evidence:
         evidence, evidence_names = await preloaded_evidence(env)
         prompt += evidence
-    prompt += "\n\n" + JUDGE_ADAPTER.prompt.format(remote=REMOTE)
+    adapter = JUDGE_ADAPTER_ORIGINAL if preload_evidence else JUDGE_ADAPTER
+    prompt += "\n\n" + adapter.prompt.format(remote=REMOTE)
     if judge_shell:
         prompt += "\n\n" + JUDGE_SHELL.prompt
     if include_transcript:
