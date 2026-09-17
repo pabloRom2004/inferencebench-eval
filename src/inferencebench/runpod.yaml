@@ -24,6 +24,11 @@ api_timeout_seconds: 30
 # Bounds idempotent API requests and SSH connection establishment.
 api_retry_attempts: 3
 
+# Pod creation waits out RunPod capacity shortfalls, which its API reports as 5xx responses.
+create_retry_attempts: 120
+
+create_retry_interval_seconds: 30
+
 ssh_keepalive_interval_seconds: 30
 
 ssh_keepalive_count_max: 3

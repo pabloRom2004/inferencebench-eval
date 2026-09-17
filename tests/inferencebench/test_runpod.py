@@ -808,3 +808,60 @@ async def test_sftp_allowance_scales_with_payload(provider, monkeypatch):
     monkeypatch.setattr(provider, "_connect", connect)
     with pytest.raises(TimeoutError, match="allowance"):
         await provider.write_file("bundle.tar.gz", b"data")
+
+
+def _rejection(status: int, text: str = "no capacity") -> httpx.HTTPStatusError:
+    """Build the error httpx raises for a definite server response."""
+    response = httpx.Response(status, text=text, request=httpx.Request("POST", "https://api.test/pods"))
+    return httpx.HTTPStatusError(f"status {status}", request=response.request, response=response)
+
+
+async def test_pod_creation_waits_out_server_rejections(provider, monkeypatch):
+    """Retry definite 5xx rejections until RunPod allocates, recording the server's explanation."""
+    provider.config["create_retry_interval_seconds"] = 0
+    calls = []
+
+    async def request(method, path, **kwargs):
+        calls.append(method)
+        if method == "POST":
+            if calls.count("POST") < 3:
+                raise _rejection(500)
+            return {"id": "new-pod"}
+        return [{"name": "someone-else", "id": "other-pod"}]
+
+    monkeypatch.setattr(provider, "_request", request)
+    assert await provider._create_pod({"name": provider.name}) == {"id": "new-pod"}
+    assert calls == ["POST", "GET", "POST", "GET", "POST"]
+    record = json.loads((provider.folder / "pod.json").read_text())
+    assert record["status"] == "create_retry"
+    assert record["attempt"] == 2
+    assert record["create_error"] == "500: no capacity"
+
+
+@pytest.mark.parametrize("outcome", ["client_error", "exhausted", "adopted", "lost_response"])
+async def test_pod_creation_never_replays_uncertain_requests(provider, monkeypatch, outcome):
+    """Give up on client errors and exhausted attempts, adopt a pod already carrying the name, and never retry a lost response."""
+    provider.config["create_retry_interval_seconds"] = 0
+    provider.config["create_retry_attempts"] = 2
+    calls = []
+
+    async def request(method, path, **kwargs):
+        calls.append(method)
+        if method == "POST":
+            if outcome == "client_error":
+                raise _rejection(400, "bad payload")
+            if outcome == "lost_response":
+                raise httpx.ReadTimeout("create response lost")
+            raise _rejection(500)
+        found = [{"name": provider.name, "id": "accepted-pod"}] if outcome == "adopted" else []
+        return [*found, {"name": "someone-else", "id": "other-pod"}]
+
+    monkeypatch.setattr(provider, "_request", request)
+    if outcome == "adopted":
+        assert await provider._create_pod({"name": provider.name}) == {"name": provider.name, "id": "accepted-pod"}
+        assert calls == ["POST", "GET"]
+        return
+    error = httpx.ReadTimeout if outcome == "lost_response" else httpx.HTTPStatusError
+    with pytest.raises(error):
+        await provider._create_pod({"name": provider.name})
+    assert calls == {"client_error": ["POST"], "exhausted": ["POST", "GET", "POST"], "lost_response": ["POST"]}[outcome]

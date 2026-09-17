@@ -28,6 +28,13 @@ from inferencebench.run_config import load_config
 TRANSFER_FLOOR_BYTES_PER_SECOND = 256 * 1024
 
 
+def _error_detail(error: BaseException) -> str:
+    """Describe a failed API call, keeping the server's explanation when it sent one."""
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"{error.response.status_code}: {error.response.text[:500]}"
+    return repr(error)
+
+
 @sandboxenv(name="inferencebench_runpod")
 class RunPodSandbox(SandboxEnvironment):
     """Run each sample in an owned RunPod pod, using authenticated SSH for commands and files."""
@@ -243,6 +250,8 @@ class RunPodSandbox(SandboxEnvironment):
             "startup_timeout_seconds",
             "snapshot_timeout_seconds",
             "poll_interval_seconds",
+            "create_retry_attempts",
+            "create_retry_interval_seconds",
         ]:
             if type(config[name]) is not int or config[name] <= 0:
                 raise ValueError(f"{name} must be a positive integer")
@@ -264,7 +273,7 @@ class RunPodSandbox(SandboxEnvironment):
             },
         }
         try:
-            pod = await env._request("POST", "/pods", json=payload)
+            pod = await env._create_pod(payload)
             env.pod_id = pod["id"]
             env._record("allocated")
             await env._wait_ready(None)
@@ -272,7 +281,7 @@ class RunPodSandbox(SandboxEnvironment):
         except BaseException as error:
             # Artifact failures must not prevent cleanup of a billable allocation.
             with suppress(OSError, ValueError):
-                env._record("provision_failed", provision_error=repr(error))
+                env._record("provision_failed", provision_error=_error_detail(error))
             with anyio.CancelScope(shield=True):
                 # Recover an accepted create request whose response was lost.
                 if env.pod_id is None:
@@ -291,6 +300,25 @@ class RunPodSandbox(SandboxEnvironment):
                 else:
                     await env.terminate()
             raise
+
+    async def _create_pod(self, payload: dict) -> dict:
+        """Request a pod, waiting out capacity and server failures that RunPod reports as 5xx."""
+        attempts = self.config["create_retry_attempts"]
+        for attempt in range(1, attempts + 1):
+            try:
+                return await self._request("POST", "/pods", json=payload)
+            except httpx.HTTPStatusError as error:
+                status = error.response.status_code
+                if (status != 429 and status < 500) or attempt == attempts:
+                    raise
+                # A rejected request must never be duplicated if it allocated after all.
+                for pod in await self._request("GET", "/pods"):
+                    if pod["name"] == self.name:
+                        return pod
+                self._record(
+                    "create_retry", attempt=attempt, create_error=_error_detail(error)
+                )
+                await asyncio.sleep(self.config["create_retry_interval_seconds"])
 
     @classmethod
     async def sample_cleanup(cls, task_name, config, environments, interrupted) -> None:
