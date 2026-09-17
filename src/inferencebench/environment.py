@@ -1,8 +1,11 @@
 import hashlib
 import json
 import os
+import re
+import shutil
 import time
 from pathlib import Path
+from typing import Any
 
 import anyio
 from fsspec.core import url_to_fs
@@ -14,9 +17,70 @@ from inspect_ai.util import sandbox, store
 
 from inferencebench.modal_sandbox import InferenceSandbox
 from inferencebench.prompts import ASSETS
+from inferencebench.run_config import load_config
 from inferencebench.runpod_sandbox import RunPodSandbox
 
 REMOTE = "/tmp/inferencebench"
+# Speed baselines measured once per workload and GPU model, shared by later samples like upstream's precomputed registry.
+BASELINE_CACHE = Path("run-artifacts") / "baselines"
+SPEED_BASELINE_FILES = ("baseline.json", "heldout-requests.jsonl")
+
+
+def gpu_model(inventory: str) -> str:
+    """Read the GPU model from the nvidia-smi CSV inventory recorded for the sample."""
+    lines = [line for line in inventory.splitlines() if line.strip()]
+    return lines[1].split(",")[0].strip() if len(lines) > 1 else "unknown"
+
+
+def speed_baseline_identity(options: dict[str, Any], gpu: str) -> dict[str, Any]:
+    """Identify a reusable Transformers speed baseline by workload, precision, evaluator revision, and GPU model."""
+    return {
+        "format_version": 1,
+        "upstream_revision": load_config("eval.yaml")["revision"],
+        "gpu": gpu,
+        **{key: options[key] for key in (
+            "base_model", "scenario", "eval_seed", "request_limit", "max_model_len", "baseline_dtype",
+        )},
+    }
+
+
+def speed_baseline_folder(identity: dict[str, Any]) -> Path:
+    """Place each shared baseline in a folder named by its workload and a digest of the full identity."""
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12]
+    model = re.sub(r"[^A-Za-z0-9_.-]+", "_", identity["base_model"])
+    return BASELINE_CACHE / f"{identity['scenario']}-seed{identity['eval_seed']}-{model}-{digest}"
+
+
+def cached_speed_baseline(identity: dict[str, Any]) -> Path | None:
+    """Return the stored baseline folder only when its manifest matches this identity and its files exist."""
+    folder = speed_baseline_folder(identity)
+    manifest = folder / "manifest.json"
+    if not manifest.is_file():
+        return None
+    try:
+        recorded = json.loads(manifest.read_text()).get("identity")
+    except ValueError:
+        return None
+    if recorded != identity or not all((folder / name).is_file() for name in SPEED_BASELINE_FILES):
+        return None
+    return folder
+
+
+def store_speed_baseline(identity: dict[str, Any], sample_folder: Path, provenance: dict[str, Any]) -> Path:
+    """Publish a freshly measured baseline for later samples, replacing any previous copy atomically."""
+    folder = speed_baseline_folder(identity)
+    staging = folder.with_name(folder.name + ".staging")
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    for name in [*SPEED_BASELINE_FILES, "baseline-generations.jsonl"]:
+        if (sample_folder / name).is_file():
+            shutil.copyfile(sample_folder / name, staging / name)
+    (staging / "manifest.json").write_text(json.dumps(
+        {"identity": identity, "measured_at": time.time(), **provenance}, indent=2,
+    ))
+    shutil.rmtree(folder, ignore_errors=True)
+    staging.rename(folder)
+    return folder
 
 
 @hooks(name="inferencebench_artifacts", description="Retain InferenceBench submissions and measurements on Hawk")
@@ -120,6 +184,13 @@ def prepare_environment() -> Solver:
         await env.write_file(
             f"{REMOTE}/runtime.py", (ASSETS / "scripts" / "runtime.py").read_text()
         )
+        # Reuse a speed baseline already measured for this workload on this GPU model.
+        identity = speed_baseline_identity(state.metadata, gpu_model(inventory))
+        cached = cached_speed_baseline(identity) if state.metadata["reuse_speed_baseline"] else None
+        state.metadata["cached_speed_baseline"] = cached is not None
+        if cached is not None:
+            for name in SPEED_BASELINE_FILES:
+                await env.upload(str(cached / name), f"{REMOTE}/{name}")
         await env.write_file(f"{REMOTE}/options.json", json.dumps(state.metadata))
 
         # Build reference measurements before the agent clock starts.
@@ -161,6 +232,21 @@ def prepare_environment() -> Solver:
         state.metadata["provenance"] = json.loads(
             (folder / "provenance.json").read_text()
         )
+        if state.metadata["reuse_speed_baseline"] and cached is None:
+            try:
+                await env.download(f"{REMOTE}/baseline-generations.jsonl", str(folder / "baseline-generations.jsonl"))
+            except Exception as error:
+                (folder / "baseline-generations-copy-error.txt").write_text(repr(error))
+            cached = store_speed_baseline(identity, folder, {
+                "gpu_inventory": inventory,
+                "downloaded_model_revision": state.metadata["provenance"].get("downloaded_model_revision"),
+                "provider": state.metadata["gpu_provider"],
+                "sample": folder.name,
+            })
+        state.metadata["speed_baseline"] = {
+            "source": "cache" if state.metadata["cached_speed_baseline"] else "measured",
+            "folder": str(cached.resolve()) if cached is not None else None,
+        }
         await checked_exec(
             env,
             [

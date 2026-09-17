@@ -34,6 +34,7 @@ def inference_bench(
     base_model:              str = DEFAULT_TASK_ARGS["base_model"],
     max_model_len:           int = DEFAULT_TASK_ARGS["max_model_len"],
     baseline_dtype:          str = DEFAULT_TASK_ARGS["baseline_dtype"],
+    reuse_speed_baseline:    bool = DEFAULT_TASK_ARGS["reuse_speed_baseline"],
     context_length:          int | None = DEFAULT_TASK_ARGS["context_length"],
     agent_seconds:           int | None = DEFAULT_TASK_ARGS["agent_seconds"],
     request_limit:           int | None = DEFAULT_TASK_ARGS["request_limit"],
@@ -76,6 +77,8 @@ def inference_bench(
         raise ValueError("quality_reference_backend must be transformers or vllm")
     if type(strict_prompt) is not bool:
         raise ValueError("strict_prompt must be a boolean")
+    if type(reuse_speed_baseline) is not bool:
+        raise ValueError("reuse_speed_baseline must be a boolean")
     if baseline_dtype not in {"float16", "bfloat16", "float32"}:
         raise ValueError("baseline_dtype must be float16, bfloat16, or float32")
     durations = [server_wait_seconds, request_timeout_seconds]

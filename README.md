@@ -120,6 +120,7 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `base_model`: `mistralai/Mistral-7B-Instruct-v0.3`. Any Hugging Face checkpoint the evaluator's Transformers stack can load; see the [implementation guide](docs/implementation.md#changing-the-base-model).
 - `baseline_dtype`: precision of the Transformers speed baseline and the reference server; `float16` (upstream). Use `bfloat16` for bf16-native models.
 - `context_length`: optimizing model's context window; `null` uses Inspect's metadata. Set `1048576` for DeepSeek V4.1 Flash.
+- `reuse_speed_baseline`: measure the PyTorch speed baseline once per scenario, seed pair and GPU model and reuse it from `run-artifacts/baselines/`, as upstream's precomputed registry does; `true`. `false` measures it inside every attempt.
 - `strict_prompt`: insert the leaderboard's strict rules (no third-party pre-quantized checkpoints, no modifying the evaluation harness) after the base-model constraint; `true`. The paper's Table 2 used the plain prompt; the site's dagger-marked rows used a strict prompt whose text is unreleased, so the wording is the port's.
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
 - `quality_samples`, `quality_seed`: `500`, `248`.
@@ -163,6 +164,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 
 ### [14] - 2026-09-17
 
+- Add `reuse_speed_baseline` (default `true`): the naive PyTorch speed baseline is measured once per scenario, seed pair and GPU model and shared by later attempts, matching upstream's precomputed baselines.
 - Pin `datasets<4` in the sandbox image; upstream's MMLU-Pro and LongBench samplers pass `trust_remote_code`, which newer releases reject.
 - Remove the bundled MMLU-Pro reference cache and its preparation CLI; every attempt measures the quality reference on its own GPU.
 - Add `quality_reference_backend`: the default measures the reference with a pinned vLLM 0.19.0 server; `original.yaml` keeps the Transformers server.

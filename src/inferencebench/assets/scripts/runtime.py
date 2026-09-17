@@ -13,7 +13,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -132,32 +132,37 @@ def prepare(options):
     spec = specs[0]
     cache_samples.cache_mmlu_pro(spec.samples_file, spec.seed, spec.limit)
 
-    with baseline_server(options):
-        config = runner.load_scenario_config(TASK)
-        config["dataset_seed"] = options["eval_seed"]
-        requests = prepare_requests(options, config, "heldout")
-        precompute_baseline._write_requests_jsonl(
-            ARTIFACTS / "heldout-requests.jsonl", requests
-        )
-        metrics = baseline_eval._run_baseline(
-            "http://127.0.0.1:8000",
-            requests,
-            options["base_model"],
-            ARTIFACTS / "baseline-generations.jsonl",
-            TASK,
-            options["request_timeout_seconds"],
-            concurrency_override=1,
-        )
-        (ARTIFACTS / "baseline.json").write_text(json.dumps(metrics))
-        if any(
-            profile["success_count"] == 0
-            for profile in metrics["profiles"].values()
-        ):
-            raise RuntimeError(
-                "Transformers baseline returned no successful requests"
+    config = runner.load_scenario_config(TASK)
+    cached = bool(options.get("cached_speed_baseline"))
+    if cached and not all((ARTIFACTS / name).is_file() for name in ["baseline.json", "heldout-requests.jsonl"]):
+        raise RuntimeError("Shared speed baseline files were not transferred to the sandbox")
+    transformers_reference = options["quality_reference_backend"] == "transformers"
+    with baseline_server(options) if (not cached or transformers_reference) else nullcontext():
+        if not cached:
+            config["dataset_seed"] = options["eval_seed"]
+            requests = prepare_requests(options, config, "heldout")
+            precompute_baseline._write_requests_jsonl(
+                ARTIFACTS / "heldout-requests.jsonl", requests
             )
+            metrics = baseline_eval._run_baseline(
+                "http://127.0.0.1:8000",
+                requests,
+                options["base_model"],
+                ARTIFACTS / "baseline-generations.jsonl",
+                TASK,
+                options["request_timeout_seconds"],
+                concurrency_override=1,
+            )
+            (ARTIFACTS / "baseline.json").write_text(json.dumps(metrics))
+            if any(
+                profile["success_count"] == 0
+                for profile in metrics["profiles"].values()
+            ):
+                raise RuntimeError(
+                    "Transformers baseline returned no successful requests"
+                )
 
-        if options["quality_reference_backend"] == "transformers":
+        if transformers_reference:
             prepare_quality_baseline(options, spec)
 
     reference_version = None
@@ -177,6 +182,7 @@ def prepare(options):
             "backend": options["quality_reference_backend"],
             "vllm_version": reference_version,
         },
+        "speed_baseline": "cached" if cached else "measured",
     }
     for path in [
         TASK / "requests.jsonl",

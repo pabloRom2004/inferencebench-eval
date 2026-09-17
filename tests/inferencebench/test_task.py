@@ -640,6 +640,7 @@ def test_registered_yaml_solver(local_task, monkeypatch, tmp_path):
         {"quality_reference_backend": "sglang"},
         {"strict_prompt": "yes"},
         {"baseline_dtype": "int8"},
+        {"reuse_speed_baseline": "yes"},
     ],
 )
 def test_invalid_workload_arguments(options):
@@ -1758,3 +1759,124 @@ def test_workspace_names_the_configured_model(monkeypatch, tmp_path):
         "export INFERENCE_BENCH_BASE_MODEL='org/other model'\nexport INFERENCE_BENCH_MAX_MODEL_LEN=8192\n"
     )
     assert "'INFERENCE_BENCH_BASE_MODEL': 'org/other model'" in (task / "evaluate.py").read_text()
+
+
+def test_speed_baseline_reuse(monkeypatch, tmp_path):
+    """Measure the speed baseline once per workload and GPU model, then upload the stored copy to later samples."""
+    environment = importlib.import_module("inferencebench.environment")
+    monkeypatch.setattr(environment, "BASELINE_CACHE", tmp_path / "baselines")
+    written, uploads, prepares = {}, [], []
+
+    async def execute(command, **kwargs):
+        """Answer the GPU inventory and record the options each preparation received."""
+        if command[0] == "nvidia-smi":
+            return ExecResult(success=True, returncode=0, stdout="name, memory.total [MiB], driver_version\nNVIDIA H100 80GB HBM3, 81559 MiB, 580.95.05\n", stderr="")
+        if "prepare" in command:
+            prepares.append(json.loads(written["options"]))
+        return ExecResult(success=True, returncode=0, stdout="", stderr="")
+
+    async def read_file(path):
+        """Serve the trusted preparation outputs and the final measurement."""
+        name = path.rsplit("/", 1)[-1]
+        if name == "final.json":
+            return json.dumps(measurements(2))
+        if name == "baseline.json":
+            return json.dumps(measurements())
+        if name == "provenance.json":
+            return json.dumps({"downloaded_model_revision": "rev", "input_sha256": {}})
+        if name == "heldout-requests.jsonl":
+            return '{"messages": []}\n'
+        return "{}"
+
+    async def write_file(path, content):
+        """Capture the options handed to the sandbox runtime."""
+        if path.endswith("options.json"):
+            written["options"] = content
+
+    async def upload(local, remote):
+        """Record which shared files reach the sandbox."""
+        uploads.append(Path(local).name)
+
+    async def download(remote, local):
+        """Materialise downloaded artifacts locally."""
+        Path(local).write_text("x")
+
+    env = SimpleNamespace(resource_id="pod", exec=execute, read_file=read_file, write_file=write_file, upload=upload, download=download, terminate=AsyncMock())
+    monkeypatch.setattr(environment, "gpu_environment", lambda: env)
+    monkeypatch.setattr(SCORERS, "restart_for_scoring", AsyncMock(return_value=env))
+
+    def run(**overrides):
+        """Run one sample through the real preparation solver and return its metadata."""
+        task = inference_bench(**{"scenarios": "A", "seed_pairs": [[21, 1337]], "agent_seconds": 2, **overrides})
+        task.sandbox = None
+        [log] = inspect_eval(task, solver=generate(), model="mockllm/subject", model_roles={"integrity": judge_model()}, display="none", log_dir="logs")
+        assert log.status == "success", log.error
+        return log.samples[0].metadata
+
+    first = run()
+    assert prepares[-1]["cached_speed_baseline"] is False and first["speed_baseline"]["source"] == "measured"
+    [stored] = list((tmp_path / "baselines").iterdir())
+    manifest = json.loads((stored / "manifest.json").read_text())
+    assert manifest["identity"]["gpu"] == "NVIDIA H100 80GB HBM3" and manifest["identity"]["scenario"] == "A" and manifest["identity"]["eval_seed"] == 1337
+    assert (stored / "baseline.json").exists() and (stored / "heldout-requests.jsonl").exists() and (stored / "baseline-generations.jsonl").exists()
+    assert uploads == []
+
+    second = run()
+    assert prepares[-1]["cached_speed_baseline"] is True and second["speed_baseline"]["source"] == "cache"
+    assert sorted(uploads) == ["baseline.json", "heldout-requests.jsonl"]
+    assert second["speed_baseline"]["folder"] == str(stored.resolve())
+
+    run(seed_pairs=[[21, 428]])
+    assert prepares[-1]["cached_speed_baseline"] is False and len(list((tmp_path / "baselines").iterdir())) == 2
+
+    uploads.clear()
+    run(reuse_speed_baseline=False)
+    assert prepares[-1]["cached_speed_baseline"] is False and uploads == []
+
+
+@pytest.mark.parametrize("backend", ["transformers", "vllm"])
+def test_prepare_skips_measurement_for_shared_baseline(monkeypatch, tmp_path, backend):
+    """Use the uploaded baseline instead of measuring, and start the Transformers server only when the reference needs it."""
+    from dataclasses import dataclass
+
+    from inferencebench.assets.scripts import runtime
+
+    @dataclass
+    class Spec:
+        """Use the upstream dataset specification's replaceable fields."""
+        samples_file: Path
+        seed: int
+        limit: int
+
+    (tmp_path / "task").mkdir()
+    (tmp_path / "baseline.json").write_text(json.dumps(measurements()))
+    (tmp_path / "heldout-requests.jsonl").write_text('{"messages": []}\n')
+    spec = Spec(tmp_path / "quality-samples.jsonl", 248, 2)
+    run_baseline = Mock()
+    sampled = []
+    upstream = SimpleNamespace(
+        baseline_eval=SimpleNamespace(_run_baseline=run_baseline),
+        cache_samples=SimpleNamespace(cache_longbench_v2=Mock(), cache_mmlu_pro=Mock(side_effect=lambda path, seed, limit: path.write_text("{}\n"))),
+        precompute_baseline=SimpleNamespace(_write_requests_jsonl=lambda path, rows: Path(path).write_text("".join(json.dumps(row) + "\n" for row in rows))),
+        quality_gate=SimpleNamespace(get_quality_specs=lambda: ([spec], None, None)),
+        runner=SimpleNamespace(load_scenario_config=lambda task: {}, _get_tokenizer=lambda model: None, _prepare_requests=lambda config, *args: sampled.append(config["dataset_seed"]) or ([{"messages": []}],)),
+    )
+    monkeypatch.setitem(sys.modules, "inference", upstream)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=lambda *args, **kwargs: str(tmp_path / "snapshot")))
+    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
+    monkeypatch.setattr(runtime, "TASK", tmp_path / "task")
+    monkeypatch.setattr(runtime.shutil, "copy", Mock())
+    monkeypatch.setattr(runtime, "install_workspace", Mock())
+    monkeypatch.setattr(runtime, "wait_ready", Mock(return_value=True))
+    monkeypatch.setattr(runtime, "prepare_quality_baseline", Mock())
+    monkeypatch.setattr(runtime.subprocess, "check_output", Mock(return_value="0.19.0\n"))
+    launches = []
+    monkeypatch.setattr(runtime.subprocess, "Popen", lambda command, **kwargs: launches.append(command[1] if command[0].endswith("vllm") else "transformers") or Mock(pid=1, poll=Mock(return_value=None), wait=Mock()))
+    monkeypatch.setattr(runtime.os, "killpg", Mock())
+
+    options = {**inference_bench(quality_reference_backend=backend).dataset[0].metadata, "cached_speed_baseline": True}
+    runtime.prepare(options)
+    run_baseline.assert_not_called()
+    assert sampled == [options["dev_seed"]]
+    assert launches == (["transformers"] if backend == "transformers" else ["serve"])
+    assert json.loads((tmp_path / "provenance.json").read_text())["speed_baseline"] == "cached"
