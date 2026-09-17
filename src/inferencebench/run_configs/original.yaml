@@ -31,6 +31,8 @@ task:
         judge_prompt: original_judge
         max_grader_attempts: 3
         include_transcript: false
+        preload_evidence: true
+        judge_shell: true
 
 solver:
   # Switch harness below, or use --solver inferencebench/original_agent -S harness=codex_cli -S version=auto.

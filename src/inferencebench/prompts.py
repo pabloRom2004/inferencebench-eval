@@ -115,6 +115,16 @@ JUDGE_TRANSCRIPT = Prompt(
     inspect_parameter="include_transcript",
 )
 
+JUDGE_SHELL = Prompt(
+    title="inspect_judge_shell",
+    prompt="A run_shell tool executes commands from /home/agent/task in the restarted scoring sandbox, matching the original judge's shell access; measurements are already complete.",
+    role="judge",
+    origin="Inspect port",
+    origin_note="Original-config shell access; the released judge ran as Claude Code with unrestricted tools.",
+    inspect_parameter="judge_shell",
+    affordances={"run_shell": "Run shell commands in the submission workspace after measurement."},
+)
+
 # Index auxiliary prompts too, while keeping task and rubric selection distinct.
 PROMPTS.update(
     {
@@ -125,6 +135,7 @@ PROMPTS.update(
             NUDGE_PROMPT,
             TOKEN_BUDGET_REMINDER,
             JUDGE_ADAPTER,
+            JUDGE_SHELL,
             JUDGE_TRANSCRIPT,
         ]
     }

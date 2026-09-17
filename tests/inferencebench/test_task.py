@@ -169,6 +169,8 @@ def test_config_dataset_and_provenance():
     assert original["task"]["args"]["scorer"]["args"] == {
         **config["task"]["args"]["scorer"]["args"],
         "include_transcript": False,
+        "preload_evidence": True,
+        "judge_shell": True,
     }
     assert original["solver"]["args"]["version"] == "2.1.114"
 
@@ -1151,6 +1153,8 @@ def test_bound_judge_configuration(local_task, tmp_path):
         "role": "integrity",
         "attempts": 1,
         "include_transcript": True,
+        "preloaded_evidence": [],
+        "judge_shell": False,
     }
 
 
@@ -1562,11 +1566,65 @@ def test_judge_transcript_toggle(
 
 
 @pytest.mark.parametrize("value", [None, "false", 0])
-def test_invalid_transcript_toggle(value):
-    """Reject ambiguous transcript settings before creating a scoring sandbox."""
+@pytest.mark.parametrize("setting", ["include_transcript", "preload_evidence", "judge_shell"])
+def test_invalid_judge_toggles(setting, value):
+    """Reject ambiguous judge evidence settings before creating a scoring sandbox."""
     args = load_config()["task"]["args"]["scorer"]["args"]
-    with pytest.raises(ValueError, match="include_transcript must be a boolean"):
-        SCORERS.inference_speedup(**{**args, "include_transcript": value})
+    with pytest.raises(ValueError, match=f"{setting} must be a boolean"):
+        SCORERS.inference_speedup(**{**args, setting: value})
+
+
+@pytest.mark.parametrize("missing_launcher", [False, True])
+def test_original_judge_evidence_and_shell(local_task, monkeypatch, missing_launcher):
+    """Give the original-config judge upstream's inline launcher and log tail plus shell access in the scoring sandbox."""
+    from inspect_ai.model import ChatMessageUser
+
+    _, env = local_task
+    launcher = "/home/agent/task/start_server.sh"
+    log_lines = [f"server line {index}" for index in range(1, 251)]
+
+    async def read_file(path):
+        """Serve the restarted submission's launcher and a 250-line final server log."""
+        if path.endswith("final.json"):
+            return json.dumps(measurements(2))
+        if path == launcher:
+            if missing_launcher:
+                raise FileNotFoundError(path)
+            return "launcher evidence"
+        if path.endswith("final-server.log"):
+            return "\n".join(log_lines)
+        return ""
+
+    env.read_file = read_file
+    args = load_config("run_configs/original.yaml")["task"]["args"]
+    assert args["scorer"]["args"] == {**args["scorer"]["args"], "preload_evidence": True, "judge_shell": True, "include_transcript": False}
+    task = inference_bench(**{**args, "scenarios": "A", "seed_pairs": [[21, 1337]], "agent_seconds": 2})
+    task.sandbox = None
+    judge = get_model(
+        "mockllm/original-judge",
+        custom_outputs=[
+            ModelOutput.for_tool_call("mockllm/original-judge", "run_shell", {"command": "ls"}),
+            ModelOutput.from_content("mockllm/original-judge", "no contamination detected\nonly allowed use detected"),
+        ],
+    )
+    [log] = inspect_eval(task, solver=generate(), model="mockllm/subject", model_roles={"integrity": judge}, display="none", log_dir="logs")
+    assert log.status == "success", log.error
+    sample = read_eval_log(log.location, resolve_attachments=True).samples[0]
+    initial = next(e for e in sample.events if e.event == "model" and e.model == "mockllm/original-judge")
+    text = initial.input[0].text
+    assert isinstance(initial.input[0], ChatMessageUser)
+    evidence = text.index("# Pre-loaded File Evidence")
+    assert evidence < text.index("Inspect adapter:") and "The following files were found in the task directory. Use them as primary evidence for your judgement." in text
+    assert ("## Contents of `start_server.sh`\n```\nlauncher evidence\n```" in text) is not missing_launcher
+    assert "## Contents of `server.log`\n```\n[...truncated 50 lines...]\nserver line 51\n" in text
+    assert "server line 50\n" not in text and text.rstrip().count("server line 250") == 1
+    assert "run_shell tool executes commands from /home/agent/task" in text and "agent-transcript.json" not in text
+    shell = [e for e in sample.events if e.event == "tool" and e.function == "run_shell"]
+    assert len(shell) == 1 and shell[0].arguments == {"command": "ls"}
+    assert any(call.args[0] == ["bash", "-lc", "cd /home/agent/task && ls"] for call in env.exec.await_args_list)
+    details = sample.scores["inference_speedup"].metadata["integrity_judge"]
+    assert details["preloaded_evidence"] == (["server.log"] if missing_launcher else ["start_server.sh", "server.log"])
+    assert details["judge_shell"] is True and details["include_transcript"] is False
 
 
 @pytest.mark.parametrize("failure", ["solver", "connection"])

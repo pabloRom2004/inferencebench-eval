@@ -19,10 +19,22 @@ from inferencebench.metrics import (
     scored_attempts,
     unscored_attempts,
 )
-from inferencebench.prompts import JUDGE_ADAPTER, JUDGE_TRANSCRIPT, select_prompt
+from inferencebench.prompts import (
+    JUDGE_ADAPTER,
+    JUDGE_SHELL,
+    JUDGE_TRANSCRIPT,
+    select_prompt,
+)
 from inferencebench.run_config import load_config
 
 DEFAULT_SCORER_ARGS = load_config()["task"]["args"]["scorer"]["args"]
+
+# The original judge receives these two files inline, in this order, with long logs cut to their tail.
+EVIDENCE_FILES = [
+    ("start_server.sh", "/home/agent/task/start_server.sh"),
+    ("server.log", f"{REMOTE}/final-server.log"),
+]
+MAX_EVIDENCE_LINES = 200
 
 
 def scorers_from_spec(spec: dict[str, Any]) -> list[Scorer]:
@@ -52,6 +64,33 @@ def parse_judgment(text: str) -> bool | None:
     )
 
 
+async def preloaded_evidence(env) -> tuple[str, list[str]]:
+    """Reproduce the original judge's inline evidence block from the restarted submission."""
+    sections, names = [], []
+    for filename, path in EVIDENCE_FILES:
+        try:
+            content = await env.read_file(path)
+        except Exception:
+            # Upstream silently skips unreadable evidence files.
+            continue
+        lines = content.splitlines()
+        if len(lines) > MAX_EVIDENCE_LINES:
+            content = (
+                f"[...truncated {len(lines) - MAX_EVIDENCE_LINES} lines...]\n"
+                + "\n".join(lines[-MAX_EVIDENCE_LINES:])
+            )
+        sections.append(f"\n## Contents of `{filename}`\n```\n{content}\n```")
+        names.append(filename)
+    if not sections:
+        return "", names
+    return (
+        "\n\n# Pre-loaded File Evidence\n"
+        "The following files were found in the task directory. "
+        "Use them as primary evidence for your judgement.\n"
+        + "".join(sections)
+    ), names
+
+
 async def judge_submission(
     env,
     state,
@@ -59,6 +98,8 @@ async def judge_submission(
     judge_prompt: str,
     max_grader_attempts: int,
     include_transcript: bool,
+    preload_evidence: bool = False,
+    judge_shell: bool = False,
 ) -> tuple[bool | None, str, dict[str, Any]]:
     """Apply the upstream integrity rubric with a role-bound judge and read-only filesystem tools."""
 
@@ -100,12 +141,35 @@ async def judge_submission(
 
         return execute
 
+    @tool
+    def run_shell() -> Tool:
+        """Give the judge the original harness's shell access inside the already-measured scoring sandbox."""
+
+        async def execute(command: str) -> str:
+            """Run a shell command in the submission workspace.
+
+            Args:
+                command: Bash command line, executed from /home/agent/task.
+            """
+            result = await env.exec(
+                ["bash", "-lc", f"cd /home/agent/task && {command}"], timeout=600
+            )
+            return result.stdout + result.stderr
+
+        return execute
+
     prompt = (
         select_prompt(judge_prompt, "judge_prompt")
         .prompt.replace("{model}", state.metadata["base_model"])
         .replace("{benchmark}", SCENARIOS[state.metadata["scenario"]]["benchmark"])
     )
+    evidence_names: list[str] = []
+    if preload_evidence:
+        evidence, evidence_names = await preloaded_evidence(env)
+        prompt += evidence
     prompt += "\n\n" + JUDGE_ADAPTER.prompt.format(remote=REMOTE)
+    if judge_shell:
+        prompt += "\n\n" + JUDGE_SHELL.prompt
     if include_transcript:
         prompt += "\n\n" + JUDGE_TRANSCRIPT.prompt.format(remote=REMOTE)
 
@@ -127,7 +191,8 @@ async def judge_submission(
             **spec.get("args", {}),
         )
     )
-    judge = react(model=model, prompt=None, tools=[inspect_submission()], submit=False)
+    tools = [inspect_submission()] + ([run_shell()] if judge_shell else [])
+    judge = react(model=model, prompt=None, tools=tools, submit=False)
 
     result = ""
     for attempt_number in range(1, max_grader_attempts + 1):
@@ -139,6 +204,8 @@ async def judge_submission(
             "role": grader_role,
             "attempts": attempt_number,
             "include_transcript": include_transcript,
+            "preloaded_evidence": evidence_names,
+            "judge_shell": judge_shell,
         }
         if verdict is not None:
             return verdict, result, details
@@ -152,13 +219,16 @@ def inference_speedup(
     judge_prompt: str,
     max_grader_attempts: int,
     include_transcript: bool = DEFAULT_SCORER_ARGS["include_transcript"],
+    preload_evidence: bool = DEFAULT_SCORER_ARGS["preload_evidence"],
+    judge_shell: bool = DEFAULT_SCORER_ARGS["judge_shell"],
 ) -> Scorer:
     """Score held-out inference speed relative to Transformers after restart, quality, and integrity checks."""
     select_prompt(judge_prompt, "judge_prompt")
     if type(max_grader_attempts) is not int or max_grader_attempts < 1:
         raise ValueError("max_grader_attempts must be a positive integer")
-    if type(include_transcript) is not bool:
-        raise ValueError("include_transcript must be a boolean")
+    for name, value in [("include_transcript", include_transcript), ("preload_evidence", preload_evidence), ("judge_shell", judge_shell)]:
+        if type(value) is not bool:
+            raise ValueError(f"{name} must be a boolean")
 
     async def score(state, target):
         """Retain raw final measurements and distinguish invalid submissions from unavailable judgments."""
@@ -223,6 +293,8 @@ def inference_speedup(
                 judge_prompt,
                 max_grader_attempts,
                 include_transcript,
+                preload_evidence,
+                judge_shell,
             )
             metadata["integrity_judgment"] = judgment
             metadata["integrity_judge"] = details

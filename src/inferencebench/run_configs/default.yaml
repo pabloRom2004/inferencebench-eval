@@ -32,6 +32,9 @@ task:
         judge_prompt: original_judge
         max_grader_attempts: 3
         include_transcript: true
+        # Original-judge evidence: inline launcher and server-log tail, plus shell access.
+        preload_evidence: false
+        judge_shell: false
 
 solver:
   # CLI: --solver inferencebench/cli_agent -S harness=claude_code
