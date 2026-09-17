@@ -23,7 +23,7 @@ uv run modal token new  # Authenticate the default GPU provider
 
 > [!NOTE]
 >
-> Both configs include cached long prompts. Each attempt measures the Transformers speed baseline and the 500-question MMLU-Pro reference on its own GPU before optimization starts, then checks the submitted server's quality after restart. The reference measurement takes about an hour on an H100.
+> Both configs include cached long prompts. Each attempt measures the Transformers speed baseline and the 500-question MMLU-Pro reference on its own GPU before optimization starts, then checks the submitted server's quality after restart. The default measures the reference with a pinned vLLM server in minutes; the original config keeps the Transformers server, about an hour on an H100.
 
 Replace `provider/model` with your Inspect model identifier. Run ReAct: **(Recommended way to run the eval)**
 
@@ -122,6 +122,7 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
 - `request_cache`: bundled prompts; original uses its full-workload cache. `null` enables corpus sampling.
 - `quality_samples`, `quality_seed`: `500`, `248`.
+- `quality_reference_backend`: server measuring the MMLU-Pro reference; `vllm` (pinned 0.19.0, minutes), original `transformers` (about an hour).
 - `quality_tau`: required fraction of reference accuracy; `0.95`.
 
 Generation (`generate_config`):
@@ -161,7 +162,8 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 
 ### [14] - 2026-09-17
 
-- Remove the bundled MMLU-Pro reference cache and its preparation CLI; every attempt measures the Transformers quality reference on its own GPU.
+- Remove the bundled MMLU-Pro reference cache and its preparation CLI; every attempt measures the quality reference on its own GPU.
+- Add `quality_reference_backend`: the default measures the reference with a pinned vLLM 0.19.0 server; `original.yaml` keeps the Transformers server.
 
 ### [13] - 2026-09-12
 

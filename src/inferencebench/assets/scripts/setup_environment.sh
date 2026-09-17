@@ -25,3 +25,7 @@ python3 -c "from huggingface_hub import snapshot_download; snapshot_download('mi
 uv venv /opt/evaluator
 uv pip install --python /opt/evaluator/bin/python \
     aiohttp requests datasets sentencepiece protobuf numpy jinja2 'transformers<5'
+
+# Fast MMLU-Pro reference server, pinned apart from the evaluator and agent engines.
+uv venv /opt/reference
+uv pip install --python /opt/reference/bin/python vllm==0.19.0

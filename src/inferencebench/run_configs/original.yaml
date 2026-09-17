@@ -18,6 +18,7 @@ task:
     request_cache: assets/datasets/longbench/original-requests.json.gz
     quality_samples: 500
     quality_seed: 248
+    quality_reference_backend: transformers
     quality_tau: 0.95
     quality_concurrency: 4
     quality_baseline_max_attempts: 1

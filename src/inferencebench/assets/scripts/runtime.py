@@ -19,6 +19,7 @@ from pathlib import Path
 ROOT = Path("/opt/inferencebench")
 TASK = Path("/home/agent/task")
 ARTIFACTS = Path("/tmp/inferencebench")
+REFERENCE_BIN = Path("/opt/reference/bin")
 sys.path.insert(0, str(ROOT / "src/eval"))
 
 
@@ -156,14 +157,27 @@ def prepare(options):
                 "Transformers baseline returned no successful requests"
             )
 
-        prepare_quality_baseline(options, spec)
+        if options["quality_reference_backend"] == "transformers":
+            prepare_quality_baseline(options, spec)
+
+    reference_version = None
+    if options["quality_reference_backend"] == "vllm":
+        with reference_server(options) as reference_version:
+            prepare_quality_baseline(options, spec)
 
     # Give the agent a separate development request set.
     config["dataset_seed"] = options["dev_seed"]
     dev_requests = prepare_requests(options, config, "dev")
     precompute_baseline._write_requests_jsonl(TASK / "requests.jsonl", dev_requests)
     # Record resolved weights and the exact evaluated inputs without claiming historical data pins.
-    provenance = {"downloaded_model_revision": Path(snapshot).name, "input_sha256": {}}
+    provenance = {
+        "downloaded_model_revision": Path(snapshot).name,
+        "input_sha256": {},
+        "quality_reference": {
+            "backend": options["quality_reference_backend"],
+            "vllm_version": reference_version,
+        },
+    }
     if options.get("request_cache_provenance") is not None:
         provenance["request_cache"] = options["request_cache_provenance"]
     for path in [
@@ -179,8 +193,31 @@ def prepare(options):
 
 
 @contextmanager
+def serve(command, log_name, description, options):
+    """Run one local server on port 8000 and release the GPU when its measurement ends."""
+    with (ARTIFACTS / log_name).open("w") as log:
+        server = subprocess.Popen(
+            command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
+        )
+        try:
+            if not wait_ready(server, options["server_wait_seconds"]):
+                raise RuntimeError(
+                    f"{description} failed to start: " + (ARTIFACTS / log_name).read_text()
+                )
+            yield
+        finally:
+            if server.poll() is None:
+                os.killpg(server.pid, signal.SIGTERM)
+                try:
+                    server.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(server.pid, signal.SIGKILL)
+                    server.wait()
+
+
+@contextmanager
 def baseline_server(options):
-    """Run the original float16 Transformers server and release it after reference measurement."""
+    """Run the original float16 Transformers server for the speed baseline and the original quality reference."""
     command = [
         "python3",
         str(ROOT / "src/eval/inference/servers/transformers_openai_server.py"),
@@ -193,25 +230,31 @@ def baseline_server(options):
         "--max-model-len",
         str(options["max_model_len"]),
     ]
-    with (ARTIFACTS / "baseline-server.log").open("w") as log:
-        server = subprocess.Popen(
-            command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
-        )
-        try:
-            if not wait_ready(server, options["server_wait_seconds"]):
-                raise RuntimeError(
-                    "Transformers baseline failed to start: "
-                    + (ARTIFACTS / "baseline-server.log").read_text()
-                )
-            yield
-        finally:
-            if server.poll() is None:
-                os.killpg(server.pid, signal.SIGTERM)
-                try:
-                    server.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(server.pid, signal.SIGKILL)
-                    server.wait()
+    with serve(command, "baseline-server.log", "Transformers baseline", options):
+        yield
+
+
+@contextmanager
+def reference_server(options):
+    """Serve the same float16 checkpoint through the pinned vLLM environment for a faster quality reference."""
+    version = subprocess.check_output(
+        [str(REFERENCE_BIN / "python"), "-c", "import vllm; print(vllm.__version__)"], text=True
+    ).strip()
+    command = [
+        str(REFERENCE_BIN / "vllm"),
+        "serve",
+        options["base_model"],
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000",
+        "--dtype",
+        "float16",
+        "--max-model-len",
+        str(options["max_model_len"]),
+    ]
+    with serve(command, "reference-server.log", "vLLM reference", options):
+        yield version
 
 
 def prepare_quality_baseline(options, spec):

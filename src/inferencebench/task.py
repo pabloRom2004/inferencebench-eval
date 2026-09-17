@@ -39,6 +39,7 @@ def inference_bench(
     request_cache:           str | None = DEFAULT_TASK_ARGS["request_cache"],
     quality_samples:         int = DEFAULT_TASK_ARGS["quality_samples"],
     quality_seed:            int = DEFAULT_TASK_ARGS["quality_seed"],
+    quality_reference_backend: str = DEFAULT_TASK_ARGS["quality_reference_backend"],
     quality_tau:             float = DEFAULT_TASK_ARGS["quality_tau"],
     quality_concurrency:     int = DEFAULT_TASK_ARGS["quality_concurrency"],
     quality_baseline_max_attempts: int = DEFAULT_TASK_ARGS["quality_baseline_max_attempts"],
@@ -72,6 +73,8 @@ def inference_bench(
         raise ValueError("Model length, concurrency, and sample counts must be positive integers")
     if type(quality_seed) is not int or quality_seed < 0:
         raise ValueError("quality_seed must be a nonnegative integer")
+    if quality_reference_backend not in {"transformers", "vllm"}:
+        raise ValueError("quality_reference_backend must be transformers or vllm")
     durations = [server_wait_seconds, request_timeout_seconds]
     if agent_seconds is not None:
         durations.append(agent_seconds)

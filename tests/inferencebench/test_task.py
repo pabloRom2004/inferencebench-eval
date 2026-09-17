@@ -154,6 +154,7 @@ def test_config_dataset_and_provenance():
         "request_limit",
         "request_cache",
         "quality_baseline_max_attempts",
+        "quality_reference_backend",
     }
     assert {
         key: value
@@ -697,6 +698,7 @@ def test_registered_yaml_solver(local_task, monkeypatch, tmp_path):
         {"request_timeout_seconds": -1},
         {"quality_tau": math.nan},
         {"quality_tau": True},
+        {"quality_reference_backend": "sglang"},
     ],
 )
 def test_invalid_workload_arguments(options):
@@ -1628,3 +1630,71 @@ def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path, fai
         assert archive.extractfile("task/start_server.sh").read() == b"unfinished launcher"
     assert json.loads(fs.cat(f"{path}/agent-transcript.json"))["events"]
     fs.rm(path, recursive=True)
+
+
+@pytest.mark.parametrize("backend", ["transformers", "vllm"])
+def test_quality_reference_backend_server_order(monkeypatch, tmp_path, backend):
+    """Measure the vLLM reference only after the Transformers baseline has released the GPU, and record the backend."""
+    from dataclasses import dataclass
+
+    from inferencebench.assets.scripts import runtime
+
+    @dataclass
+    class Spec:
+        """Use the upstream dataset specification's replaceable fields."""
+        samples_file: Path
+        seed: int
+        limit: int
+
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    spec = Spec(tmp_path / "quality-samples.jsonl", 248, 2)
+    events = []
+
+    def write_requests(path, rows):
+        """Write the request files whose hashes preparation records."""
+        Path(path).write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    upstream = SimpleNamespace(
+        baseline_eval=SimpleNamespace(_run_baseline=Mock(return_value={"profiles": {"burst": {"success_count": 1}}})),
+        cache_samples=SimpleNamespace(
+            cache_longbench_v2=Mock(),
+            cache_mmlu_pro=Mock(side_effect=lambda path, seed, limit: path.write_text("{}\n")),
+        ),
+        precompute_baseline=SimpleNamespace(_write_requests_jsonl=write_requests),
+        quality_gate=SimpleNamespace(get_quality_specs=lambda: ([spec], None, None)),
+        runner=SimpleNamespace(
+            load_scenario_config=lambda task: {},
+            _get_tokenizer=lambda model: None,
+            _prepare_requests=lambda *args: ([{"messages": []}],),
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "inference", upstream)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=lambda *args, **kwargs: str(tmp_path / "snapshot")))
+    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
+    monkeypatch.setattr(runtime, "TASK", task_dir)
+    monkeypatch.setattr(runtime.shutil, "copy", Mock())
+    monkeypatch.setattr(runtime, "install_workspace", Mock())
+    monkeypatch.setattr(runtime, "wait_ready", Mock(return_value=True))
+    monkeypatch.setattr(runtime, "prepare_quality_baseline", Mock(side_effect=lambda options, spec: events.append("quality")))
+    monkeypatch.setattr(runtime.subprocess, "check_output", Mock(return_value="0.19.0\n"))
+
+    def popen(command, **kwargs):
+        """Record each server launch as a live process."""
+        events.append(("start", command[0], command[1]))
+        return Mock(pid=len(events), poll=Mock(return_value=None), wait=Mock())
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", popen)
+    monkeypatch.setattr(runtime.os, "killpg", Mock(side_effect=lambda pid, sig: events.append("stop")))
+
+    options = inference_bench(request_cache=None, quality_reference_backend=backend).dataset[0].metadata
+    runtime.prepare(options)
+
+    transformers = ("start", "python3", str(runtime.ROOT / "src/eval/inference/servers/transformers_openai_server.py"))
+    vllm = ("start", "/opt/reference/bin/vllm", "serve")
+    if backend == "transformers":
+        assert events == [transformers, "quality", "stop"]
+    else:
+        assert events == [transformers, "stop", vllm, "quality", "stop"]
+    provenance = json.loads((tmp_path / "provenance.json").read_text())
+    assert provenance["quality_reference"] == {"backend": backend, "vllm_version": "0.19.0" if backend == "vllm" else None}

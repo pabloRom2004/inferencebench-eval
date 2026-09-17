@@ -87,7 +87,7 @@
     <path d="M66 587 H382" stroke="#3c3c3c"/>
     <text class="body" x="66" y="620">MMLU-Pro reference · measured</text>
     <text class="small" x="66" y="649">500 questions · seed 248 · Mistral 7B</text>
-    <text class="small" x="66" y="676">Transformers server, before optimization</text>
+    <text class="small" x="66" y="676">Transformers or vLLM, before optimization</text>
   </g>
 
   <g id="scoring">
