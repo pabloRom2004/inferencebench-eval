@@ -90,16 +90,46 @@ def wait_ready(server, seconds):
 
 
 def prepare_requests(options, config, name):
-    """Run the original seeded sampler and tokenizer-based truncation on the downloaded pool."""
+    """Run the original seeded sampler, restoring the boundary token its decode normalization can drop."""
     from inference import runner
 
-    args = (
-        config,
-        options["request_limit"],
-        runner._get_tokenizer(options["base_model"]),
-        options["max_model_len"],
-    )
-    return runner._prepare_requests(*args)[0]
+    tokenizer = runner._get_tokenizer(options["base_model"])
+    # Upstream aborts when a head-truncated prompt lands below the sampled minimum; mirror its bounds.
+    speed = config.get("synthetic", {})
+    output_len = int(speed.get("output_len", int(config.get("max_new_tokens", 256))))
+    target = int(speed.get("input_len", 1024))
+    cap = runner._compute_max_input_tokens(options["max_model_len"], output_len)
+    if cap is not None:
+        target = min(target, cap)
+    minimum = max(0, math.ceil(target * runner._range_ratio(speed.get("range_ratio", 0.8))))
+    original = runner._truncate_messages
+    repairs = []
+
+    def truncate(messages, tokenizer, maximum, *, keep="tail"):
+        """Re-truncate with the missing token when head truncation falls below the sampled range."""
+        source = [dict(message) for message in messages]
+        result = original(messages, tokenizer, maximum, keep=keep)
+        actual = runner._count_chat_tokens(result, tokenizer)
+        if keep == "head" and actual < minimum:
+            repaired = original(source, tokenizer, maximum + minimum - actual, keep=keep)
+            count = runner._count_chat_tokens(repaired, tokenizer)
+            if minimum <= count <= maximum:
+                repairs.append({
+                    "target_input_token_count": maximum,
+                    "original_input_token_count": actual,
+                    "repaired_input_token_count": count,
+                })
+                return repaired
+        return result
+
+    runner._truncate_messages = truncate
+    try:
+        requests = runner._prepare_requests(
+            config, options["request_limit"], tokenizer, options["max_model_len"]
+        )[0]
+    finally:
+        runner._truncate_messages = original
+    return requests, repairs
 
 
 def prepare(options):
@@ -133,6 +163,7 @@ def prepare(options):
     cache_samples.cache_mmlu_pro(spec.samples_file, spec.seed, spec.limit)
 
     config = runner.load_scenario_config(TASK)
+    repairs = {}
     cached = bool(options.get("cached_speed_baseline"))
     if cached and not all((ARTIFACTS / name).is_file() for name in ["baseline.json", "heldout-requests.jsonl"]):
         raise RuntimeError("Shared speed baseline files were not transferred to the sandbox")
@@ -140,7 +171,7 @@ def prepare(options):
     with baseline_server(options) if (not cached or transformers_reference) else nullcontext():
         if not cached:
             config["dataset_seed"] = options["eval_seed"]
-            requests = prepare_requests(options, config, "heldout")
+            requests, repairs["heldout"] = prepare_requests(options, config, "heldout")
             precompute_baseline._write_requests_jsonl(
                 ARTIFACTS / "heldout-requests.jsonl", requests
             )
@@ -172,7 +203,7 @@ def prepare(options):
 
     # Give the agent a separate development request set.
     config["dataset_seed"] = options["dev_seed"]
-    dev_requests = prepare_requests(options, config, "dev")
+    dev_requests, repairs["dev"] = prepare_requests(options, config, "dev")
     precompute_baseline._write_requests_jsonl(TASK / "requests.jsonl", dev_requests)
     # Record resolved weights and the exact evaluated inputs without claiming historical data pins.
     provenance = {
@@ -183,6 +214,7 @@ def prepare(options):
             "vllm_version": reference_version,
         },
         "speed_baseline": "cached" if cached else "measured",
+        "truncation_repairs": repairs,
     }
     for path in [
         TASK / "requests.jsonl",

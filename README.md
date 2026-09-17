@@ -164,6 +164,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 ### [14] - 2026-09-17
 
 - Measure the naive PyTorch speed baseline once per scenario, seed pair and GPU model and share it with later attempts from `run-artifacts/baselines/`, matching upstream's precomputed baselines.
+- Restore upstream's one-token truncation repair inside the sandbox sampler, recorded per attempt in provenance, so full-count prompts (scenario A seed 999, B and C on several seeds) no longer abort preparation.
 - Scale RunPod SFTP transfer time with payload size, so CLI bundle uploads such as OpenCode's no longer hit the 30-second API timeout, and end the agent budget cleanly when a transfer is cut off at the deadline.
 - Pin `datasets<4` in the sandbox image; upstream's MMLU-Pro and LongBench samplers pass `trust_remote_code`, which newer releases reject.
 - Remove the bundled MMLU-Pro reference cache and its preparation CLI; every attempt measures the quality reference on its own GPU.

@@ -205,13 +205,17 @@ def test_runtime_request_selection(monkeypatch, tmp_path):
     rows = [{"messages": [{"role": "user", "content": "prepared request"}]}]
     runner = SimpleNamespace(
         _get_tokenizer=Mock(return_value="tokenizer"),
+        _compute_max_input_tokens=lambda max_model_len, output_len: None,
+        _range_ratio=float,
+        _count_chat_tokens=lambda messages, tokenizer: 0,
+        _truncate_messages=lambda messages, tokenizer, maximum, keep="tail": messages,
         _load_requests_jsonl=Mock(return_value=(rows, [])),
         _prepare_requests=Mock(return_value=(rows, [])),
     )
     monkeypatch.setitem(sys.modules, "inference", SimpleNamespace(runner=runner))
     monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
     config = SCENARIOS["A"]["config"]
-    assert runtime.prepare_requests(options, config, "dev") == rows
+    assert runtime.prepare_requests(options, config, "dev") == (rows, [])
     runner._prepare_requests.assert_called_once_with(config, 10, "tokenizer", 32768)
     runner._load_requests_jsonl.assert_not_called()
 
@@ -1677,6 +1681,10 @@ def test_quality_reference_backend_server_order(monkeypatch, tmp_path, backend):
         runner=SimpleNamespace(
             load_scenario_config=lambda task: {},
             _get_tokenizer=lambda model: None,
+            _compute_max_input_tokens=lambda max_model_len, output_len: None,
+            _range_ratio=float,
+            _count_chat_tokens=lambda messages, tokenizer: 0,
+            _truncate_messages=lambda messages, tokenizer, maximum, keep="tail": messages,
             _prepare_requests=lambda *args: ([{"messages": []}],),
         ),
     )
@@ -1854,7 +1862,7 @@ def test_prepare_skips_measurement_for_shared_baseline(monkeypatch, tmp_path, ba
         cache_samples=SimpleNamespace(cache_longbench_v2=Mock(), cache_mmlu_pro=Mock(side_effect=lambda path, seed, limit: path.write_text("{}\n"))),
         precompute_baseline=SimpleNamespace(_write_requests_jsonl=lambda path, rows: Path(path).write_text("".join(json.dumps(row) + "\n" for row in rows))),
         quality_gate=SimpleNamespace(get_quality_specs=lambda: ([spec], None, None)),
-        runner=SimpleNamespace(load_scenario_config=lambda task: {}, _get_tokenizer=lambda model: None, _prepare_requests=lambda config, *args: sampled.append(config["dataset_seed"]) or ([{"messages": []}],)),
+        runner=SimpleNamespace(load_scenario_config=lambda task: {}, _get_tokenizer=lambda model: None, _compute_max_input_tokens=lambda max_model_len, output_len: None, _range_ratio=float, _count_chat_tokens=lambda messages, tokenizer: 0, _truncate_messages=lambda messages, tokenizer, maximum, keep="tail": messages, _prepare_requests=lambda config, *args: sampled.append(config["dataset_seed"]) or ([{"messages": []}],)),
     )
     monkeypatch.setitem(sys.modules, "inference", upstream)
     monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=lambda *args, **kwargs: str(tmp_path / "snapshot")))
@@ -1903,3 +1911,40 @@ async def test_deadline_absorbs_failures_after_expiry(monkeypatch):
 
     with pytest.raises(RuntimeError, match="real failure"):
         await reminders.with_deadline(broken)(state, None)
+
+
+def test_prepare_requests_restores_dropped_boundary_token(monkeypatch):
+    """Repair upstream's one-token head-truncation shortfall instead of aborting sampling, and restore the sampler afterwards."""
+    from inferencebench.assets.scripts import runtime
+
+    def truncate(messages, tokenizer, maximum, *, keep="tail"):
+        """Drop one token at the sampled boundary, as upstream's decode normalization can."""
+        keep_tokens = maximum - 1 if maximum == 100 else maximum
+        return [{"role": "user", "content": messages[0]["content"][:keep_tokens]}]
+
+    runner = SimpleNamespace(
+        _get_tokenizer=lambda model: None,
+        _compute_max_input_tokens=lambda max_model_len, output_len: None,
+        _range_ratio=lambda value: float(value),
+        _count_chat_tokens=lambda messages, tokenizer: len(messages[0]["content"]),
+        _truncate_messages=truncate,
+    )
+
+    def prepare(config, limit, tokenizer, max_model_len):
+        """Sample one prompt and apply upstream's range check through the module-level truncation hook."""
+        messages = runner._truncate_messages([{"role": "user", "content": "x" * 100}], tokenizer, 100, keep="head")
+        realized = runner._count_chat_tokens(messages, tokenizer)
+        if not (100 <= realized <= 100):
+            raise RuntimeError("Sampled LongBench-v2 request realized outside input range")
+        return [{"messages": messages}], None
+
+    runner._prepare_requests = prepare
+    monkeypatch.setitem(sys.modules, "inference", SimpleNamespace(runner=runner))
+    options = {"base_model": "m", "max_model_len": 32768, "request_limit": 1}
+    config = {"synthetic": {"input_len": 100, "output_len": 10, "range_ratio": 1.0}}
+    requests, repairs = runtime.prepare_requests(options, config, "heldout")
+    assert len(requests[0]["messages"][0]["content"]) == 100
+    assert repairs == [{"target_input_token_count": 100, "original_input_token_count": 99, "repaired_input_token_count": 100}]
+    assert runner._truncate_messages is truncate
+    with pytest.raises(RuntimeError, match="outside input range"):
+        prepare(config, 1, None, 32768)
