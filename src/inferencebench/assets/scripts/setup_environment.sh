@@ -10,7 +10,7 @@ rm -rf /var/lib/apt/lists/*
 pip install uv
 uv pip install --system torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 uv pip install --system \
-    aiohttp requests accelerate datasets sentencepiece protobuf numpy tokenizers 'transformers<5'
+    aiohttp requests accelerate 'datasets<4' sentencepiece protobuf numpy tokenizers 'transformers<5'
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
 
@@ -24,7 +24,7 @@ python3 -c "from huggingface_hub import snapshot_download; snapshot_download('mi
 # Isolate evaluator dependencies from agent-installed serving engines.
 uv venv /opt/evaluator
 uv pip install --python /opt/evaluator/bin/python \
-    aiohttp requests datasets sentencepiece protobuf numpy jinja2 'transformers<5'
+    aiohttp requests 'datasets<4' sentencepiece protobuf numpy jinja2 'transformers<5'
 
 # Fast MMLU-Pro reference server, pinned apart from the evaluator and agent engines.
 uv venv /opt/reference
