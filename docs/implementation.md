@@ -263,7 +263,7 @@ existing external-sandbox option at process startup. It changes no benchmark
 logic and retains Hawk's rejection of nonstandard isolation without its
 Kubernetes controls. Use it only for this task's standard RunPod setup.
 
-The feature-branch workflow publishes an immutable commit tag to GHCR. Set
+The main-branch workflow publishes an immutable commit tag to GHCR whenever the runner Dockerfile or the workflow changes. Set
 `runner.image` to that image's digest. Keep provider credentials in Hawk secrets.
 The tested run configuration uses `HAWK_RUNNER_REFRESH_TOKEN: ""` so the supplied
 work API key is not replaced by Hawk OAuth, and a fixed `UV_EXCLUDE_NEWER` date
