@@ -12,7 +12,6 @@ from inspect_ai.model import ModelInfo, get_model, get_model_info, set_model_inf
 from inspect_ai.solver import Solver, solver
 from inspect_ai.util import sandbox, store
 
-from inferencebench.dataset import cached_requests, load_request_cache
 from inferencebench.modal_sandbox import InferenceSandbox
 from inferencebench.prompts import ASSETS
 from inferencebench.runpod_sandbox import RunPodSandbox
@@ -121,22 +120,6 @@ def prepare_environment() -> Solver:
         await env.write_file(
             f"{REMOTE}/runtime.py", (ASSETS / "scripts" / "runtime.py").read_text()
         )
-        cache = load_request_cache(state.metadata)
-        if cache is not None:
-            state.metadata["request_cache_provenance"] = {
-                key: value for key, value in cache.items() if key != "requests"
-            }
-            for name, seed in [
-                ("dev", state.metadata["dev_seed"]),
-                ("heldout", state.metadata["eval_seed"]),
-            ]:
-                rows = cached_requests(
-                    cache, state.metadata["scenario"], seed, state.metadata["request_limit"]
-                )
-                await env.write_file(
-                    f"{REMOTE}/{name}-requests.jsonl",
-                    "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
-                )
         await env.write_file(f"{REMOTE}/options.json", json.dumps(state.metadata))
 
         # Build reference measurements before the agent clock starts.

@@ -9,8 +9,8 @@ the port calls its evaluator instead of implementing another one.
 ## Data flow
 
 1. **Select the experiment.** `task.py` reads YAML settings and `dataset.py`
-   makes one sample per scenario and development/evaluation seed pair. Validate
-   cached inputs before allocating a GPU. `default.yaml` uses ten requests;
+   makes one sample per scenario and development/evaluation seed pair. No
+   prepared inputs exist; the sampler runs per attempt. `default.yaml` uses ten requests;
    `original.yaml` retains A: 128, B: 64, C: 256 per traffic profile, D: 96.
 2. **Prepare one H100.** `environment.py` provisions the configured backend,
    installs the pinned evaluator, downloads Mistral-7B-Instruct-v0.3, and
@@ -75,7 +75,7 @@ of the paper's reported model/scaffold experiment.
 | Isolation | Hawk/RunPod replaces the original scheduler/Apptainer arrangement. The full filesystem survives restart, rather than selected persistent directories. Live shell exports must be written into the standalone launcher. |
 | Hardware/software | H100 80GB, minimum 16 vCPUs/180GB RAM, Ubuntu 22.04 and CUDA 12.8 follow upstream. Storage, GPU host scheduling, driver, and unpinned dependencies can differ; record them with the run. |
 | Strict prompt | The site's dagger-marked runs used an unreleased stricter prompt that names third-party pre-quantized checkpoints and harness edits as disallowed. Both configs insert two bullets stating those rules after the base-model constraint (`strict_prompt: true`); the wording is the port's. Set it false to reproduce the paper's Table 2 prompt. |
-| Input caches | Frozen requests avoid repeated sampling. Twelve original full-workload prompts needed a recorded one-token truncation repair to satisfy upstream's own bounds. Seeds, selected documents, and output budgets are retained. |
+| Inputs | Each attempt downloads LongBench-v2 and runs upstream's seeded sampler and tokenizer-based truncation inside the sandbox, unmodified, so its one-token truncation abort remains possible on full counts. The MMLU-Pro reference is measured per attempt. |
 | Retries | Upstream retries whole final evaluations, sometimes with shorter request timeouts. This port evaluates once and reports failures. Default reference preparation retries failed questions without resampling or selecting a better answer; original permits one attempt. |
 
 The paper and released code also disagree in several places. The paper describes

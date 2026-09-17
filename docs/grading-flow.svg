@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1640" height="1156" viewBox="0 0 1640 1156" role="img" aria-labelledby="title description">
   <title id="title">InferenceBench: Prompt → Agent → Grader</title>
-  <desc id="description">The prompt supplies the scenario, Mistral model, H100 hardware, and serving contract. Before optimization, Inspect loads the cached long prompts, then measures Transformers speed and MMLU-Pro quality baselines. The agent edits start_server.sh and tests repeatedly with evaluate.py on development prompts. Final grading restarts the saved submission, measures held-out speed and 500-question MMLU-Pro quality, and judges integrity. The score is the scenario objective divided by the same-run baseline. Epochs and seeds are averaged before the geometric mean across scenarios.</desc>
+  <desc id="description">The prompt supplies the scenario, Mistral model, H100 hardware, and serving contract. Before optimization, Inspect samples the long prompts from LongBench-v2, then measures Transformers speed and MMLU-Pro quality baselines. The agent edits start_server.sh and tests repeatedly with evaluate.py on development prompts. Final grading restarts the saved submission, measures held-out speed and 500-question MMLU-Pro quality, and judges integrity. The score is the scenario objective divided by the same-run baseline. Epochs and seeds are averaged before the geometric mean across scenarios.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; fill: #eeeeee; }
@@ -81,9 +81,9 @@
   <g id="references">
     <rect class="panel" x="40" y="424" width="368" height="286" rx="16"/>
     <text class="label" x="66" y="468">Trusted inputs</text>
-    <text class="body" x="66" y="509">LongBench prompts · bundled</text>
+    <text class="body" x="66" y="509">LongBench-v2 prompts · sampled</text>
     <text class="small" x="66" y="538">Default: 10 requests per profile</text>
-    <text class="small" x="66" y="565">Original: full counts and all seeds</text>
+    <text class="small" x="66" y="565">Original: full counts, seeded per attempt</text>
     <path d="M66 587 H382" stroke="#3c3c3c"/>
     <text class="body" x="66" y="620">MMLU-Pro reference · measured</text>
     <text class="small" x="66" y="649">500 questions · seed 248 · Mistral 7B</text>
@@ -113,7 +113,7 @@
 
     <path d="M480 852 H1140" stroke="#3c3c3c"/>
     <text class="label" x="488" y="889">Before optimization</text>
-    <text class="small" x="488" y="919">Load the cached long prompts.</text>
+    <text class="small" x="488" y="919">Download LongBench-v2 and sample the prompts.</text>
     <text class="small" x="488" y="945">Measure Transformers speed and MMLU-Pro reference.</text>
     <path d="M480 964 H1140" stroke="#3c3c3c"/>
     <text class="label" x="488" y="997">Final measurements</text>

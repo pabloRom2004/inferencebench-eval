@@ -37,7 +37,6 @@ def inference_bench(
     context_length:          int | None = DEFAULT_TASK_ARGS["context_length"],
     agent_seconds:           int | None = DEFAULT_TASK_ARGS["agent_seconds"],
     request_limit:           int | None = DEFAULT_TASK_ARGS["request_limit"],
-    request_cache:           str | None = DEFAULT_TASK_ARGS["request_cache"],
     quality_samples:         int = DEFAULT_TASK_ARGS["quality_samples"],
     quality_seed:            int = DEFAULT_TASK_ARGS["quality_seed"],
     quality_reference_backend: str = DEFAULT_TASK_ARGS["quality_reference_backend"],
@@ -59,8 +58,6 @@ def inference_bench(
         raise ValueError("gpu_provider must be modal or runpod")
     if gpu_config is not None:
         gpu_config = str(Path(gpu_config).expanduser().resolve())
-    if request_cache is not None:
-        request_cache = str((Path(__file__).parent / Path(request_cache).expanduser()).resolve())
     options = {
         name: value
         for name, value in locals().items()

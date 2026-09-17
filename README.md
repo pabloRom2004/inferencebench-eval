@@ -23,7 +23,7 @@ uv run modal token new  # Authenticate the default GPU provider
 
 > [!NOTE]
 >
-> Both configs include cached long prompts. Each attempt measures the Transformers speed baseline and the 500-question MMLU-Pro reference on its own GPU before optimization starts, then checks the submitted server's quality after restart. The default measures the reference with a pinned vLLM server in minutes; the original config keeps the Transformers server, about an hour on an H100.
+> Each attempt samples its long prompts from LongBench-v2 with the original seeded sampler, then measures the Transformers speed baseline and the 500-question MMLU-Pro reference on its own GPU before optimization starts, then checks the submitted server's quality after restart. The default measures the reference with a pinned vLLM server in minutes; the original config keeps the Transformers server, about an hour on an H100.
 
 Replace `provider/model` with your Inspect model identifier. Run ReAct: **(Recommended way to run the eval)**
 
@@ -122,7 +122,6 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `context_length`: optimizing model's context window; `null` uses Inspect's metadata. Set `1048576` for DeepSeek V4.1 Flash.
 - `strict_prompt`: insert the leaderboard's strict rules (no third-party pre-quantized checkpoints, no modifying the evaluation harness) after the base-model constraint; `true`. The paper's Table 2 used the plain prompt; the site's dagger-marked rows used a strict prompt whose text is unreleased, so the wording is the port's.
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
-- `request_cache`: bundled prompts; original uses its full-workload cache. `null` enables corpus sampling.
 - `quality_samples`, `quality_seed`: `500`, `248`.
 - `quality_reference_backend`: server measuring the MMLU-Pro reference; `vllm` (pinned 0.19.0, minutes), original `transformers` (about an hour).
 - `quality_tau`: required fraction of reference accuracy; `0.95`.
@@ -150,11 +149,11 @@ The separate integrity judge uses GPT-6 Astra by default and Claude Sonnet 4.6 i
 
 Four [scenarios](src/inferencebench/assets/datasets/scenarios.json), with one seed pair by default and three in the original configuration. The default selects A; all scenarios give four or twelve samples respectively. Original request counts are A: 128, B: 64, C: 256 per profile, D: 96.
 
-[Assets](src/inferencebench/assets) contain prompts, the LongBench request cache, scripts, and licenses. The MMLU-Pro reference is measured on the Transformers server inside every attempt; a measurement on 2026-09-10 recorded 151/500 correct.
+[Assets](src/inferencebench/assets) contain prompts, scenario definitions, scripts, and licenses. The LongBench-v2 prompts and the MMLU-Pro reference are prepared inside every attempt; a reference measurement on 2026-09-10 recorded 151/500 correct.
 
 ## Scoring
 
-![InferenceBench flow: Prompt → Agent → Grader, with development feedback, scenario objectives, cached prompts, and final quality and integrity checks.](docs/grading-flow.svg)
+![InferenceBench flow: Prompt → Agent → Grader, with development feedback, scenario objectives, sampled prompts, and final quality and integrity checks.](docs/grading-flow.svg)
 
 The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring restarts the saved submission, measures held-out speed and MMLU-Pro accuracy, and judges integrity. **speedup** divides the scenario objective by its same-run Transformers baseline. **aggregate_speedup** averages epochs, then seeds within scenarios, and geometrically averages scenario means.
 
@@ -169,6 +168,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 - Give both configs the released judge's inline evidence and shell access (`preload_evidence`, `judge_shell`) and export the transcript in both; `transcript_hint` mentions it only in the default prompt.
 - Add `strict_prompt` (default `true` in both configs), inserting the leaderboard's strict rules after the base-model constraint.
 - Add `baseline_dtype`, and write the configured model into the launcher fallback, login shells, and CLI environment so no image default names Mistral.
+- Remove the bundled LongBench request caches and their builder; every attempt downloads LongBench-v2 and runs the original sampler and truncation for its own tokenizer.
 
 ### [13] - 2026-09-12
 

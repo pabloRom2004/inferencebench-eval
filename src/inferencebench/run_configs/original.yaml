@@ -19,7 +19,6 @@ task:
     # The paper's Table 2 used false; the site's dagger-marked rows used the strict prompt.
     strict_prompt: true
     request_limit: null
-    request_cache: assets/datasets/longbench/original-requests.json.gz
     quality_samples: 500
     quality_seed: 248
     quality_reference_backend: transformers

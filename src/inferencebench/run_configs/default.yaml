@@ -19,7 +19,6 @@ task:
     # Leaderboard strict rules: no third-party pre-quantized checkpoints, no harness edits.
     strict_prompt: true
     request_limit: 10
-    request_cache: assets/datasets/longbench/requests.json.gz
     quality_samples: 500
     quality_seed: 248
     # vllm measures the reference in minutes; transformers is the original server.

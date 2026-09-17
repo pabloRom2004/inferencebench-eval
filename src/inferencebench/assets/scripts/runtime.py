@@ -90,7 +90,7 @@ def wait_ready(server, seconds):
 
 
 def prepare_requests(options, config, name):
-    """Load the small prepared prefix or run the original full-corpus sampler explicitly."""
+    """Run the original seeded sampler and tokenizer-based truncation on the downloaded pool."""
     from inference import runner
 
     args = (
@@ -99,8 +99,6 @@ def prepare_requests(options, config, name):
         runner._get_tokenizer(options["base_model"]),
         options["max_model_len"],
     )
-    if options["request_cache"] is not None:
-        return runner._load_requests_jsonl(ARTIFACTS / f"{name}-requests.jsonl", *args)[0]
     return runner._prepare_requests(*args)[0]
 
 
@@ -123,14 +121,13 @@ def prepare(options):
     ARTIFACTS.mkdir(exist_ok=True)
     for name in ["scenario.json", "mission.txt", "benchmark.txt"]:
         shutil.copy(ROOT / "src/eval/tasks" / options["directory"] / name, TASK / name)
-    if options["request_cache"] is None:
-        for seed in {options["dev_seed"], options["eval_seed"]}:
-            path = (
-                ROOT
-                / f"src/eval/inference/baselines/samples/longbench_v2/{seed}_503/samples.jsonl"
-            )
-            if not path.exists():
-                cache_samples.cache_longbench_v2(path, seed, 503)
+    for seed in {options["dev_seed"], options["eval_seed"]}:
+        path = (
+            ROOT
+            / f"src/eval/inference/baselines/samples/longbench_v2/{seed}_503/samples.jsonl"
+        )
+        if not path.exists():
+            cache_samples.cache_longbench_v2(path, seed, 503)
     specs, _, _ = quality_gate.get_quality_specs()
     spec = specs[0]
     cache_samples.cache_mmlu_pro(spec.samples_file, spec.seed, spec.limit)
@@ -181,8 +178,6 @@ def prepare(options):
             "vllm_version": reference_version,
         },
     }
-    if options.get("request_cache_provenance") is not None:
-        provenance["request_cache"] = options["request_cache_provenance"]
     for path in [
         TASK / "requests.jsonl",
         ARTIFACTS / "heldout-requests.jsonl",
@@ -348,10 +343,9 @@ def install_workspace(options):
         f"export INFERENCE_BENCH_MAX_MODEL_LEN={options['max_model_len']}\n"
     )
 
-    # Development tests can override these defaults through the environment.
+    # Development tests read the prepared development requests, like upstream's precomputed files.
     env = environment(options)
-    if options["request_cache"] is not None:
-        env["INFERENCE_BENCH_REQUESTS_FILE"] = str(TASK / "requests.jsonl")
+    env["INFERENCE_BENCH_REQUESTS_FILE"] = str(TASK / "requests.jsonl")
     wrapper = "#!/opt/evaluator/bin/python\nimport os, sys\nfrom pathlib import Path\n"
     wrapper += f"for key, value in {env!r}.items(): os.environ.setdefault(key, value)\nsys.path.insert(0, {str(ROOT / 'src/eval')!r})\n"
     wrapper += "from inference.runner import build_parser, run_evaluation\nrun_evaluation(Path(__file__).parent, build_parser().parse_args())\n"

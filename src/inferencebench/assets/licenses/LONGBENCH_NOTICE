@@ -1,4 +1,4 @@
-Prepared LongBench v2 request excerpts
+LongBench v2 request sources
 
 Source: https://huggingface.co/datasets/zai-org/LongBench-v2
 Paper: https://arxiv.org/abs/2412.15204
@@ -6,12 +6,8 @@ Authors: Yushi Bai, Shangqing Tu, Jiajie Zhang, Hao Peng, Xiaozhi Wang,
 Xin Lv, Shulin Cao, Jiazheng Xu, Lei Hou, Yuxiao Dong, Jie Tang, Juanzi Li.
 The dataset declares Apache License 2.0; see LONGBENCH_LICENSE.
 
-This port modifies the source prompts by applying InferenceBench's original
-seeded selection and head truncation. requests.json.gz retains the first ten
-requests per scenario and seed; original-requests.json.gz retains the full
-original request counts. Both record the source pool, tokenizer, scenario
-configuration, and prepared request SHA-256 hashes.
-The full cache also records token-boundary corrections in truncation_repairs
-where upstream decoding would leave a prompt below its sampled length range.
-The original dataset and model were not revision-pinned by InferenceBench;
-these hashes identify the inputs used to prepare this packaged snapshot.
+No LongBench v2 data is bundled in this package. At runtime the original
+InferenceBench evaluator downloads the dataset inside the sandbox and applies
+its seeded selection and head truncation with the served model's tokenizer.
+The dataset and model are not revision-pinned by InferenceBench; each run's
+provenance records the hashes of the prompts it actually used.

@@ -17,7 +17,7 @@ from inspect_ai.solver import generate, solver
 from inspect_ai.util import ExecResult, store
 
 from inferencebench import inference_bench, original_agent, react_agent
-from inferencebench.dataset import SCENARIOS, cached_requests, load_request_cache
+from inferencebench.dataset import SCENARIOS
 from inferencebench.metrics import aggregate_speedup, complete_mean, performance
 from inferencebench.prompts import PROMPTS
 from inferencebench.run_config import load_config
@@ -155,7 +155,6 @@ def test_config_dataset_and_provenance():
         "seed_pairs",
         "scenarios",
         "request_limit",
-        "request_cache",
         "quality_baseline_max_attempts",
         "quality_reference_backend",
     }
@@ -198,67 +197,11 @@ def test_solver_override_and_judge_role(local_task, tmp_path):
     env.terminate.assert_awaited_once()
 
 
-@pytest.mark.parametrize("configuration", ["default", "original"])
-def test_prepared_request_prefixes(configuration):
-    """Load complete configured workloads for every scenario and seed while preserving shared prefixes."""
-    config = load_config(f"run_configs/{configuration}.yaml")["task"]["args"]
-    task = inference_bench(**config)
-    cache = load_request_cache(task.dataset[0].metadata)
-    prefixes = load_request_cache(inference_bench().dataset[0].metadata)
-    seeds = load_config("run_configs/original.yaml")["task"]["args"]["seed_pairs"]
-    for scenario, record in SCENARIOS.items():
-        lengths = record["config"]["synthetic"]
-        for seed in {seed for pair in seeds for seed in pair}:
-            rows = cached_requests(cache, scenario, seed, config["request_limit"])
-            assert len(rows) == (10 if configuration == "default" else record["config"]["num_requests"])
-            assert rows[:10] == cached_requests(prefixes, scenario, seed, 10)
-            assert cached_requests(cache, scenario, seed, 1) == rows[:1]
-            with pytest.raises(ValueError, match="requested"):
-                cached_requests(cache, scenario, seed, len(rows) + 1)
-            for row in rows:
-                assert row["messages"]
-                assert row["ignore_eos"] is True
-                assert row["temperature"] == record["config"]["temperature"]
-                assert 0.8 * lengths["input_len"] <= row["target_input_token_count"] <= lengths["input_len"]
-                assert row["input_token_count"] <= row["target_input_token_count"]
-                assert 0.8 * lengths["output_len"] <= row["max_new_tokens"] <= lengths["output_len"]
-                assert len(row["content_hash"]) == 64
-
-
-@pytest.mark.parametrize("options", [
-    {"base_model": "another/model"},
-    {"max_model_len": 4096},
-    {"seed_pairs": [[123, 456]]},
-    {"request_limit": 11},
-    {"request_limit": None},
-])
-def test_incompatible_request_cache(options):
-    """Reject unsupported cached workloads before GPU allocation while preserving explicit upstream sampling."""
-    with pytest.raises(ValueError, match="request_cache: null"):
-        inference_bench(**options)
-    assert inference_bench(**options, request_cache=None).dataset
-
-
-def test_request_cache_checksum(tmp_path):
-    """Detect modified prepared data before any baseline or subject execution."""
-    import gzip
-
-    options = inference_bench().dataset[0].metadata
-    cache = load_request_cache(options)
-    cache["requests"]["A"]["21"][0]["max_new_tokens"] += 1
-    path = tmp_path / "requests.json.gz"
-    path.write_bytes(gzip.compress(json.dumps(cache).encode()))
-    with pytest.raises(ValueError, match="requests_sha256"):
-        inference_bench(request_cache=str(path))
-
-
-@pytest.mark.parametrize("use_cache", [True, False])
-def test_runtime_request_selection(monkeypatch, tmp_path, use_cache):
-    """Keep cached preparation off the corpus sampler and retain the original path when disabled."""
+def test_runtime_request_selection(monkeypatch, tmp_path):
+    """Run the original corpus sampler with the configured limit, tokenizer, and context."""
     from inferencebench.assets.scripts import runtime
 
-    options = inference_bench(request_cache=None).dataset[0].metadata
-    options["request_cache"] = "prepared" if use_cache else None
+    options = inference_bench().dataset[0].metadata
     rows = [{"messages": [{"role": "user", "content": "prepared request"}]}]
     runner = SimpleNamespace(
         _get_tokenizer=Mock(return_value="tokenizer"),
@@ -269,19 +212,12 @@ def test_runtime_request_selection(monkeypatch, tmp_path, use_cache):
     monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
     config = SCENARIOS["A"]["config"]
     assert runtime.prepare_requests(options, config, "dev") == rows
-    if use_cache:
-        runner._load_requests_jsonl.assert_called_once_with(
-            tmp_path / "dev-requests.jsonl", config, 10, "tokenizer", 32768
-        )
-        runner._prepare_requests.assert_not_called()
-    else:
-        runner._prepare_requests.assert_called_once_with(config, 10, "tokenizer", 32768)
-        runner._load_requests_jsonl.assert_not_called()
+    runner._prepare_requests.assert_called_once_with(config, 10, "tokenizer", 32768)
+    runner._load_requests_jsonl.assert_not_called()
 
 
-@pytest.mark.parametrize("use_cache", [True, False])
-def test_development_wrapper_request_selection(monkeypatch, tmp_path, use_cache):
-    """Run the generated development command and verify its cached or original dataset selection."""
+def test_development_wrapper_request_selection(monkeypatch, tmp_path):
+    """Run the generated development command and verify it reads the prepared development requests."""
     import argparse
     import os
     import runpy
@@ -305,12 +241,11 @@ def test_development_wrapper_request_selection(monkeypatch, tmp_path, use_cache)
 
     runner = SimpleNamespace(build_parser=argparse.ArgumentParser, run_evaluation=run_evaluation)
     monkeypatch.setitem(sys.modules, "inference.runner", runner)
-    options = inference_bench(request_cache=None).dataset[0].metadata
-    options["request_cache"] = "prepared" if use_cache else None
+    options = inference_bench().dataset[0].metadata
     with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}, clear=True):
         runtime.install_workspace(options)
         runpy.run_path(str(tmp_path / "evaluate.py"))
-    assert observed == [str(tmp_path / "requests.jsonl") if use_cache else None]
+    assert observed == [str(tmp_path / "requests.jsonl")]
 
 
 def test_react_completes_without_early_exit_loop(local_task, tmp_path):
@@ -718,7 +653,7 @@ def test_runtime_uses_configured_workload():
     from inferencebench.assets.scripts.runtime import environment
 
     task = inference_bench(
-        max_model_len=16384, request_cache=None, quality_concurrency=2, quality_samples=16, quality_seed=0
+        max_model_len=16384, quality_concurrency=2, quality_samples=16, quality_seed=0
     )
     import os
     from unittest.mock import patch
@@ -1766,7 +1701,7 @@ def test_quality_reference_backend_server_order(monkeypatch, tmp_path, backend):
     monkeypatch.setattr(runtime.subprocess, "Popen", popen)
     monkeypatch.setattr(runtime.os, "killpg", Mock(side_effect=lambda pid, sig: events.append("stop")))
 
-    options = inference_bench(request_cache=None, quality_reference_backend=backend, baseline_dtype="bfloat16").dataset[0].metadata
+    options = inference_bench(quality_reference_backend=backend, baseline_dtype="bfloat16").dataset[0].metadata
     runtime.prepare(options)
     assert all(command[command.index("--dtype") + 1] == "bfloat16" for command in commands)
 
@@ -1816,7 +1751,7 @@ def test_workspace_names_the_configured_model(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime, "TASK", task)
     monkeypatch.setattr(runtime, "PROFILE", tmp_path / "profile.d" / "inferencebench.sh")
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
-    options = inference_bench(request_cache=None, base_model="org/other model", max_model_len=8192).dataset[0].metadata
+    options = inference_bench(base_model="org/other model", max_model_len=8192).dataset[0].metadata
     runtime.install_workspace(options)
     assert (task / "start_server.sh").read_text().startswith('MODEL_ID="${INFERENCE_BENCH_BASE_MODEL:-org/other model}"')
     assert (tmp_path / "profile.d" / "inferencebench.sh").read_text() == (

@@ -445,13 +445,10 @@ operation = sys.argv[2]
 metrics = {'profiles': {'burst': {'success_count': 1, 'ttft': {'p50': 2 if operation == 'prepare' else 1}}}, 'quality_check': {'pass': True}}
 if operation == 'prepare':
     options = json.loads((folder / 'options.json').read_text())
-    for name in ['dev', 'heldout']:
-        rows = [json.loads(line) for line in (folder / (name + '-requests.jsonl')).read_text().splitlines()]
-        assert len(rows) == options['request_limit']
-        assert 6554 <= rows[0]['target_input_token_count'] <= 8192
-        assert rows[0]['ignore_eos']
-    assert options['request_cache_provenance']['format_version'] == 1
-    Path('/home/agent/task/requests.jsonl').write_text((folder / 'dev-requests.jsonl').read_text())
+    rows = [{'messages': [{'role': 'user', 'content': 'synthetic request'}], 'ignore_eos': True,
+             'target_input_token_count': 7000, 'max_new_tokens': 1003}] * options['request_limit']
+    for path in [folder / 'heldout-requests.jsonl', Path('/home/agent/task/requests.jsonl')]:
+        path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
     import importlib.util
     spec = importlib.util.spec_from_file_location('runtime', folder / 'runtime.py')
     runtime = importlib.util.module_from_spec(spec)
