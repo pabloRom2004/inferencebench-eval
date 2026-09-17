@@ -15,7 +15,6 @@ from inspect_ai.util import sandbox, store
 from inferencebench.dataset import cached_requests, load_request_cache
 from inferencebench.modal_sandbox import InferenceSandbox
 from inferencebench.prompts import ASSETS
-from inferencebench.quality_cache import load_quality_cache, validate_quality_cache
 from inferencebench.runpod_sandbox import RunPodSandbox
 
 REMOTE = "/tmp/inferencebench"
@@ -113,11 +112,6 @@ def prepare_environment() -> Solver:
         await env.write_file(
             f"{REMOTE}/runtime.py", (ASSETS / "scripts" / "runtime.py").read_text()
         )
-        reference = load_quality_cache(state.metadata)
-        if reference is not None:
-            state.metadata["quality_cache_provenance"] = validate_quality_cache(reference, state.metadata)
-            for name in ["quality-samples.jsonl", "quality.json"]:
-                await env.upload(str(reference / name), f"{REMOTE}/{name}")
         cache = load_request_cache(state.metadata)
         if cache is not None:
             state.metadata["request_cache_provenance"] = {
@@ -152,15 +146,12 @@ def prepare_environment() -> Solver:
             # Preserve failed attempts even when preparation aborts before optimization.
             with anyio.CancelScope(shield=True):
                 try:
-                    if reference is None:
-                        archive = await env.exec(["tar", "-czf", f"{REMOTE}/quality-baseline.tar.gz",
-                                                  "-C", REMOTE, "quality-baseline"], timeout=60)
-                        if archive.success:
-                            await env.download(f"{REMOTE}/quality-baseline.tar.gz", str(folder / "quality-baseline.tar.gz"))
-                        else:
-                            (folder / "quality-baseline-copy-error.txt").write_text(archive.stderr)
+                    archive = await env.exec(["tar", "-czf", f"{REMOTE}/quality-baseline.tar.gz",
+                                              "-C", REMOTE, "quality-baseline"], timeout=60)
+                    if archive.success:
+                        await env.download(f"{REMOTE}/quality-baseline.tar.gz", str(folder / "quality-baseline.tar.gz"))
                     else:
-                        (folder / "quality-cache.json").write_text(json.dumps(state.metadata["quality_cache_provenance"], indent=2))
+                        (folder / "quality-baseline-copy-error.txt").write_text(archive.stderr)
                 except Exception as error:
                     (folder / "quality-baseline-copy-error.txt").write_text(repr(error))
         (folder / "prepare.log").write_text(output)

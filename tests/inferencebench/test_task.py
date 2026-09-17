@@ -31,12 +31,6 @@ TOOLS = importlib.import_module("inferencebench.tools")
 
 
 @pytest.fixture(autouse=True)
-def fresh_quality_reference(monkeypatch):
-    """Keep existing evaluator tests on their controlled fresh-reference path; cache reuse is tested separately."""
-    monkeypatch.setattr(TASK, "load_quality_cache", lambda options: None)
-
-
-@pytest.fixture(autouse=True)
 def remove_mock_logs():
     """Keep temporary mock logs in the flat logs directory and remove only logs created by this test."""
     folder = Path("logs")
@@ -237,8 +231,8 @@ def test_prepared_request_prefixes(configuration):
 def test_incompatible_request_cache(options):
     """Reject unsupported cached workloads before GPU allocation while preserving explicit upstream sampling."""
     with pytest.raises(ValueError, match="request_cache: null"):
-        inference_bench(**options, quality_cache=None)
-    assert inference_bench(**options, request_cache=None, quality_cache=None).dataset
+        inference_bench(**options)
+    assert inference_bench(**options, request_cache=None).dataset
 
 
 def test_request_cache_checksum(tmp_path):
@@ -716,7 +710,7 @@ def test_runtime_uses_configured_workload():
     from inferencebench.assets.scripts.runtime import environment
 
     task = inference_bench(
-        max_model_len=16384, request_cache=None, quality_cache=None, quality_concurrency=2, quality_samples=16, quality_seed=0
+        max_model_len=16384, request_cache=None, quality_concurrency=2, quality_samples=16, quality_seed=0
     )
     import os
     from unittest.mock import patch
@@ -758,7 +752,7 @@ def test_quality_baseline_failure_accounting(
         sys.modules, "inference", SimpleNamespace(precompute_quality_baseline=upstream)
     )
     monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
-    task = inference_bench(scenarios="A", seed_pairs=[[21, 1337]], quality_cache=None)
+    task = inference_bench(scenarios="A", seed_pairs=[[21, 1337]])
     options = task.dataset[0].metadata
     options["quality_baseline_max_attempts"] = 1
     if valid:

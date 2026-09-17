@@ -40,7 +40,6 @@ def main():
         seed_pairs=[[21, 1337]],
         request_limit=1,
         quality_samples=16,
-        quality_cache=None,
         agent_seconds=180,
     )
     task.solver = (

@@ -18,8 +18,8 @@ the port calls its evaluator instead of implementing another one.
    being optimized; GLM is the agent doing the optimization.
 3. **Measure the reference.** The upstream Transformers server processes the
    evaluation request set on this run's GPU, with upstream's sequential baseline
-   override. Load the compatible 500-question MMLU-Pro reference, or compute it
-   when caching is disabled. This happens before the optimization budget starts.
+   override. The same server then answers the 500-question MMLU-Pro reference.
+   This happens before the optimization budget starts.
 4. **Ask the subject to build a server.** Render the original model, scenario,
    mission, and endpoint placeholders. The token-budget prompt changes the
    original time instructions. The agent gets root, Internet, engine installation,
@@ -85,24 +85,17 @@ See the [runner](https://github.com/aisa-group/InferenceBench/blob/24cdf88f6a4e1
 [reference server](https://github.com/aisa-group/InferenceBench/blob/24cdf88f6a4e14ed85d665aa132cecccb3ee95ef/src/eval/inference/servers/transformers_openai_server.py),
 and [environment defaults](https://github.com/aisa-group/InferenceBench/blob/24cdf88f6a4e14ed85d665aa132cecccb3ee95ef/src/commit_utils/set_env_vars.sh).
 
-## Keep the MMLU-Pro cache
+## MMLU-Pro reference
 
-The useful cache stores both the fixed questions and Mistral's reference
-generations. Caching only question selection saves little; reusing the reference
-avoids repeating a recorded preparation that took about 57 minutes on an H100.
-Upstream also provides precomputed reference registries.
-
-The bundled reference is 151/500 correct (30.2%). The 95% gate therefore requires
-at least 144/500 correct from each freshly evaluated submission. Each optimized
-server still answers every question; no agent or submission answers are reused.
-Speed is also remeasured against this run's GPU baseline.
-
-Compatibility and checksums cover the model, checkpoint revision, question seed,
-count, context length, float16 Transformers backend, and evaluator revision.
-Changing the optimizing agent from GLM to another model does not invalidate the
-Mistral reference. Changing the server checkpoint or quality protocol does.
-For a strict software-stack replication, remeasure: checksums establish cache
-identity, not numerical equivalence across every dependency and GPU driver.
+Each sample measures the reference on its own GPU: before optimization, the
+float16 Transformers server answers the fixed 500 questions (seed 248), about
+57 minutes on an H100. Upstream precomputes and reuses this registry across
+runs; this port repeats the measurement per sample so no bundled answers need
+maintaining or checksum matching. The 2026-09-10 measurement was 151/500
+(30.2%), so its 95% gate required at least 144/500 from the submission; each
+run's own reference sets its gate. Each optimized server still answers every
+question; no agent or submission answers are reused. Speed is also remeasured
+against this run's GPU baseline.
 
 The fixed questions are not a secret test set against a root-capable agent.
 Trusted restoration protects the evaluator from stale edits; the integrity judge

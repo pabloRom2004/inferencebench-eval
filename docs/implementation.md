@@ -22,7 +22,7 @@ uv run inspect eval --run-config src/inferencebench/run_configs/default.yaml \
   -T scenarios=A -T 'seed_pairs=[[21,1337]]'
 ```
 
-The default config selects scenario A with one development/evaluation seed pair. Set `task.args.scenarios: null` to run all four scenarios, one sample each. The original config retains three pairs per scenario, giving twelve samples. Both schedule one sample at a time. Each sample incurs GPU charges for speed-baseline preparation, optimization, final measurement, and integrity judging. Both configurations reuse the bundled 500-question MMLU-Pro reference for Mistral-7B-Instruct-v0.3 at seed 248. The default permits 100 million tokens per sample; pass `--token-limit` to select a smaller run budget. Baseline preparation happens before optimization begins. The original configuration starts its two-hour timer after preparation.
+The default config selects scenario A with one development/evaluation seed pair. Set `task.args.scenarios: null` to run all four scenarios, one sample each. The original config retains three pairs per scenario, giving twelve samples. Both schedule one sample at a time. Each sample incurs GPU charges for speed-baseline preparation, optimization, final measurement, and integrity judging. Each sample also measures the 500-question MMLU-Pro reference on the Transformers server before optimization, about 57 minutes on one H100. The default permits 100 million tokens per sample; pass `--token-limit` to select a smaller run budget. Baseline preparation happens before optimization begins. The original configuration starts its two-hour timer after preparation.
 
 ### Configurations
 
@@ -157,8 +157,6 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `request_cache` | `assets/datasets/longbench/requests.json.gz` | Prepared request prefixes; `null` selects the original corpus sampler |
 | `quality_samples` | 500 | MMLU-Pro quality-gate questions |
 | `quality_seed` | 248 | Fixed quality sample seed |
-| `quality_cache` | `auto` | Find a matching bundled or local MMLU-Pro reference; a folder selects an explicit cache, `null` recomputes within each sample |
-| `quality_cache_dir` | `.cache/inferencebench/mmlu_pro` | Gitignored root for custom model/seed references, relative to the launch directory |
 | `quality_concurrency` | 4 | Concurrent quality-gate requests |
 | `quality_baseline_max_attempts` | 2 | Total attempts per reference question; failed questions retry individually (`original.yaml`: 1) |
 | `quality_tau` | 0.95 | Required fraction of the Transformers baseline accuracy |
@@ -169,7 +167,7 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 
 The integrity judge defaults to GPT-6 Astra through OpenRouter with low reasoning effort; `original.yaml` retains Claude Sonnet 4.6. The default judge uses the provider's `strict_tools: false` argument because its read-only inspection tool has optional pagination parameters. This avoids a strict-schema API rejection while retaining the tool's argument validation. The judge can be rebound with `--model-role integrity=...`. It inspects source and launch logs through a read-only tool. Set `task.args.scorer.args.include_transcript` to control whether the scorer also exports model outputs and tool results from the full Inspect event history, plus the current conversation, so compaction does not remove earlier evidence: `default.yaml` enables this, while `original.yaml` disables it to follow upstream's environment-based review. Disabling it removes any stale harness transcript export; ordinary CLI logs in the submission environment remain accessible. Malformed verdicts are retried three times and then marked unscored. It is separate from the subject model.
 
-Both configurations load bundled long prompts: `default.yaml` selects ten requests per development and evaluation seed from `assets/datasets/longbench/requests.json.gz`, and `original.yaml` selects the full scenario counts from `assets/datasets/longbench/original-requests.json.gz`. They preserve the original seeded selection, sampled input/output lengths, temperature, and EOS behavior. Both assets cover all four scenarios and all six original seeds. Runs send only the selected requests to the sandbox, avoiding a download and tokenization of the full 503-document LongBench pool. The speed baseline and the submitted server’s MMLU-Pro quality test still run on the allocated GPU; the Transformers MMLU-Pro reference is reused.
+Both configurations load bundled long prompts: `default.yaml` selects ten requests per development and evaluation seed from `assets/datasets/longbench/requests.json.gz`, and `original.yaml` selects the full scenario counts from `assets/datasets/longbench/original-requests.json.gz`. They preserve the original seeded selection, sampled input/output lengths, temperature, and EOS behavior. Both assets cover all four scenarios and all six original seeds. Runs send only the selected requests to the sandbox, avoiding a download and tokenization of the full 503-document LongBench pool. The speed baseline, the Transformers MMLU-Pro reference, and the submitted server’s MMLU-Pro quality test run on the allocated GPU.
 
 The default's smaller workload changes the experiment: scenario C replays ten requests per profile and cannot reach the original burst concurrency of 64. For the full workload, use `original.yaml`, which retains counts of A: 128, B: 64, C: 256 per profile, and D: 96 with `request_limit: null`. To sample directly from the source corpus, set `request_cache: null`. Unsupported cached seeds, model/context settings, or larger request counts fail before GPU allocation; regenerate the cache or select the original sampler.
 
@@ -192,30 +190,11 @@ Preparing the full sets exposed an upstream truncation error: decoding a token p
 
 Set `task.args.context_length: 1048576` for DeepSeek V4.1 Flash, matching the capacity reported by [OpenRouter's model metadata](https://openrouter.ai/api/v1/models). Inspect's 75% ReAct compaction threshold then resolves to 786,432 input tokens. The default `null` uses Inspect's model information. This setting describes the optimizing agent; `max_model_len` controls the Mistral server being optimized. The provider still enforces its actual context limit, and each CLI retains its own context-management policy.
 
-Both configurations select `quality_cache: auto`. The task checks for a complete MMLU-Pro reference before GPU allocation, matching `base_model`, `quality_seed`, `quality_samples`, context length, float16 Transformers backend, and upstream evaluator revision. `base_model` is the server being optimized; changing Inspect's `--model` (the optimizing agent) does not invalidate this reference. The cache includes the exact questions, every resolved answer, the initial results and explicit recovery attempts, accuracy, model revision, and a checksum manifest. A changed model revision is rejected during model preparation. Reuse does not replace the final quality check of the submitted server or the speed baseline measured on that run's GPU.
+Each sample measures its own MMLU-Pro reference on the allocated GPU. After the speed baseline, the same float16 Transformers server answers the 500 questions selected by upstream's seeded sampler (seed 248), with the original greedy generation and answer parsing; the [MMLU-Pro source attribution](../src/inferencebench/assets/licenses/MMLU_PRO_NOTICE) covers the runtime download. The questions and reference accuracy are copied to the controller as trusted inputs and restored for final scoring, and the resolved answers, including any recovery attempts, are archived in `quality-baseline.tar.gz` under the sample's run artifacts. A measurement on 2026-09-10 scored 151/500 (30.2%) and took approximately 57 minutes on one Modal H100, or 62 minutes including sandbox setup. This is an observed duration for the original Transformers reference server, not a promise for other hardware or models.
 
-The bundled reference is in `src/inferencebench/assets/datasets/mmlu_pro/mistral-7b-seed-248/`, with [MMLU-Pro source attribution](../src/inferencebench/assets/licenses/MMLU_PRO_NOTICE). `quality.json` summarizes the model, seed, question count, correct answers, and accuracy; `manifest.json` records compatibility settings and file checksums. Its `reference.eval` contains one sample per question, exported from the actual upstream generations. The run's original `.eval` is also saved directly in `logs/`; supporting diagnostics go under `run-artifacts/mmlu-pro-reference-.../`.
+The long-prompt settings remain independent of MMLU-Pro: `default.yaml` uses the bundled ten-request prefixes and `original.yaml` uses the bundled full original request sets. Changing the server model, context, workload seeds, or request count may require regenerating `request_cache` or setting it to `null`, as described above.
 
-The shipped measurement scored 151/500 (30.2%). Its preparation took approximately 57 minutes on one Modal H100, or 62 minutes including sandbox setup, with one failed request recovered on retry. This is an observed duration for the original Transformers reference server, not a promise for other hardware or models. Cached runs skip this preparation. Fresh preparations print progress every 25 completed questions, relayed to the console within 30 seconds.
-
-For another model, seed, sample count, or context length, prepare its reference first. A missing reference stops the full evaluation with a command containing the required settings:
-
-```bash
-uv run python -m inferencebench.prepare_quality --run-config my-run.yaml
-uv run inspect eval --run-config my-run.yaml --model openrouter/z-ai/glm-5.3-flash --log-dir logs
-```
-
-Preparation allocates one configured GPU and runs only the MMLU-Pro reference. No optimizing agent or integrity judge runs. Each custom reference gets a separate folder in `.cache/inferencebench/mmlu_pro/`, excluded from Git and built packages. Subsequent preparations reuse a valid reference. Use `--force` to remeasure; the previous cache is replaced only after the new reference succeeds. Local references take precedence over the bundled one. An explicit `quality_cache` folder must match all reference settings too. To deliberately recompute inside each full-evaluation sample, set `quality_cache: null`.
-
-The long-prompt settings remain independent of MMLU-Pro: `default.yaml` uses the bundled ten-request prefixes and `original.yaml` uses the bundled full original request sets. Changing the server model, context, workload seeds, or request count may also require regenerating `request_cache` or setting it to `null`, as described above.
-
-To regenerate the shipped reference using the built-in model, seed, sample count, and context:
-
-```bash
-uv run python -m inferencebench.prepare_quality --bundle --force
-```
-
-When measuring a fresh reference, the maintained configuration retries each failed Transformers quality-reference request once, one request at a time, with the same input and generation limits. Successful answers are retained, including incorrect answers; retries do not select the best answer. Both attempts and the resolved reference are saved in `quality-baseline.tar.gz`. A reference with missing requests, no successful requests, exhausted failures, or zero/nonfinite accuracy stops preparation. This recovery policy was added after a reference question repeatedly exceeded 300 seconds under four-request load but completed alone. `original.yaml` retains one attempt. The subject's tools, final quality gate, and token budgets are unaffected.
+The maintained configuration retries each failed Transformers quality-reference request once, one request at a time, with the same input and generation limits. Successful answers are retained, including incorrect answers; retries do not select the best answer. Both attempts and the resolved reference are saved in `quality-baseline.tar.gz`. A reference with missing requests, no successful requests, exhausted failures, or zero/nonfinite accuracy stops preparation. This recovery policy was added after a reference question repeatedly exceeded 300 seconds under four-request load but completed alone. `original.yaml` retains one attempt. The subject's tools, final quality gate, and token budgets are unaffected.
 
 A uses inverse p50 time to first token; B uses inverse p50 time per output token; C uses the geometric mean of request throughput across burst, Poisson, and constant-arrival profiles; D uses the geometric mean of inverse p50 TTFT, inverse p50 TPOT, and request throughput. Each objective is divided by a Transformers baseline measured on the same held-out requests. The baseline uses the original sequential override.
 
@@ -225,7 +204,7 @@ A failed launcher, failed quality gate, or prohibited submission receives 1×. A
 
 This is an Inspect port with cloud GPU backends, not an exact reconstruction of the paper's machine images or every reported agent configuration:
 
-- The upstream revision is pinned. Its evaluator is reused without changing its formulas. Original files copied into this package retain their upstream license. Fresh preparations resolve the currently available model and dataset, as upstream did; historical equality is unverified. The MMLU-Pro cache freezes the selected questions and resolved answers and records the model revision. Each full run records its resolved model snapshot and hashes of its development, held-out, and quality inputs in `provenance.json`.
+- The upstream revision is pinned. Its evaluator is reused without changing its formulas. Original files copied into this package retain their upstream license. Fresh preparations resolve the currently available model and dataset, as upstream did; historical equality is unverified. Each full run records its resolved model snapshot and hashes of its development, held-out, and quality inputs in `provenance.json`.
 - Modal or RunPod replaces Apptainer. A filesystem snapshot or volume copy preserves system installs and engine source edits as well as the workspace; live processes are discarded. The original harness carried selected persistent directories into a fresh Apptainer container and replayed a captured server environment. This port requires settings in the standalone launcher and does not replay live shell exports.
 - The CUDA and PyTorch versions follow the original agent image. The evaluator and initial Transformers server retain `transformers<5`: testing 5.16.1 reproduced its changed chat-template return type breaking upstream token counting. The evaluator has a separate virtual environment so engine installs do not upgrade it. Other Python dependencies were unpinned upstream and resolve at image build time; the Modal build records their versions. Hardware scheduling and dependency drift mean paper scores are not guaranteed reproducible.
 - `original.yaml` represents the API-Claude variant through Inspect SWE’s API bridge. The main upstream experiment selected `claude_non_api`, whose prompt and outer timer differ. This port keeps the agreed exact 7200 seconds and omits the outer runner’s 300-second grace. It forwards the upstream `BASH_MAX_TIMEOUT_MS=36000000` environment setting. The original CLI install was unpinned; 2.1.114 is a tested port choice. The integrity judge uses the original rubric with Inspect ReAct and a read-only inspection tool, returning the original two verdict lines rather than writing verdict files. These are harness changes, not verbatim agent trajectories.
@@ -244,7 +223,6 @@ Start with [task.py](../src/inferencebench/task.py), which connects these module
 | --- | --- |
 | `run_configs/default.yaml`, `original.yaml` | Workload, agent, judge, and budget settings |
 | [dataset.py](../src/inferencebench/dataset.py), [prompts.py](../src/inferencebench/prompts.py) | Scenario/seed samples and original prompt provenance |
-| [quality_cache.py](../src/inferencebench/quality_cache.py), [prepare_quality.py](../src/inferencebench/prepare_quality.py) | MMLU-Pro cache validation, standalone preparation, and per-question Inspect logs |
 | [environment.py](../src/inferencebench/environment.py) | Shared H100 setup, trusted inputs, and scoring restart |
 | [modal_sandbox.py](../src/inferencebench/modal_sandbox.py), [runpod_sandbox.py](../src/inferencebench/runpod_sandbox.py) | Provider allocation, SSH/file transport, persistence, and cleanup |
 | [harness_default.py](../src/inferencebench/harness_default.py), [harness_original.py](../src/inferencebench/harness_original.py) | ReAct and coding CLI agents |
@@ -253,7 +231,7 @@ Start with [task.py](../src/inferencebench/task.py), which connects these module
 | [assets/scripts/runtime.py](../src/inferencebench/assets/scripts/runtime.py) | Thin adapter calling the original evaluator inside the GPU container |
 | [scorers.py](../src/inferencebench/scorers.py), [metrics.py](../src/inferencebench/metrics.py) | Final measurements, integrity judgment, and aggregation |
 
-The execution order is **check quality cache → measure speed baseline → run agent → restart server → measure and judge**. Tests are in `tests/inferencebench/`.
+The execution order is **validate cached prompts → measure speed and quality baselines → run agent → restart server → measure and judge**. Tests are in `tests/inferencebench/`.
 
 Packaged assets are grouped by purpose:
 
@@ -261,7 +239,7 @@ Packaged assets are grouped by purpose:
 | --- | --- |
 | `prompts/` | Task prompts and the original judging rubric |
 | `licenses/` | Upstream and dataset licenses and attribution notices |
-| `datasets/` | Scenario definitions, the LongBench request cache, and the complete MMLU-Pro reference |
+| `datasets/` | Scenario definitions and the LongBench request cache |
 | `scripts/` | Container setup, RunPod startup, the evaluator adapter, and request-cache preparation |
 
 ## Validation
@@ -279,7 +257,7 @@ Local validation covers budget-only stopping, optional submission, continuation,
 
 The shared GPU smoke test uses a scripted model to exercise a real H100, real Mistral inference, and the fresh-container scorer. It reduces scenario A to one speed request and 16 quality questions, and supplies a mock integrity verdict. Its result verifies plumbing and must not be reported as a benchmark score. The opt-in local Docker test uses synthetic measurements and no GPU; it validates SSH, file persistence, process reset, trusted restoration, and the Inspect scoring path. Search tests exercise successful and failed searches through mockllm; a separate live, key-free query verified real search results.
 
-A real-agent smoke run on September 10, 2026 used DeepSeek V4.1 Flash with a five-million-token limit on one Modal H100. For scenario A and seed pair `[21, 1337]`, it reused the bundled MMLU-Pro reference and long prompts, then optimized and evaluated a vLLM server. Across ten held-out requests, p50 time to first token fell from 282 ms to 194 ms (1.458×). The submitted server scored 156/500 on MMLU-Pro against the cached 151/500 reference and passed the integrity judge. The run took approximately 63 minutes and consumed 5.04 million optimizer tokens, with the final model call slightly exceeding the limit. This is a single-sample smoke result, not a complete benchmark result.
+A real-agent smoke run on September 10, 2026 used DeepSeek V4.1 Flash with a five-million-token limit on one Modal H100. For scenario A and seed pair `[21, 1337]`, it reused the bundled long prompts and a cached MMLU-Pro reference that later versions no longer bundle, then optimized and evaluated a vLLM server. Across ten held-out requests, p50 time to first token fell from 282 ms to 194 ms (1.458×). The submitted server scored 156/500 on MMLU-Pro against the 151/500 reference and passed the integrity judge. The run took approximately 63 minutes and consumed 5.04 million optimizer tokens, with the final model call slightly exceeding the limit. This is a single-sample smoke result, not a complete benchmark result.
 
 The standalone package follows the HLE module layout and the neighboring ExploitBench task's short configuration and harness split. To contribute it to Inspect Evals, move `src/inferencebench` to `src/inspect_evals/inferencebench`, update absolute imports and registered names, and register the task in the destination repository. No `.reference/` content is required at runtime. That ignored directory preserves the original checkout, paper, and audit notes.
 

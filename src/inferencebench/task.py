@@ -10,7 +10,6 @@ from inspect_ai.util import SandboxEnvironmentSpec, registry_create
 
 from inferencebench.dataset import get_inference_dataset
 from inferencebench.environment import prepare_environment, retain_failed_submission
-from inferencebench.quality_cache import load_quality_cache
 from inferencebench.run_config import load_config
 from inferencebench.scorers import scorers_from_spec
 
@@ -40,8 +39,6 @@ def inference_bench(
     request_cache:           str | None = DEFAULT_TASK_ARGS["request_cache"],
     quality_samples:         int = DEFAULT_TASK_ARGS["quality_samples"],
     quality_seed:            int = DEFAULT_TASK_ARGS["quality_seed"],
-    quality_cache:           str | None = DEFAULT_TASK_ARGS["quality_cache"],
-    quality_cache_dir:       str = DEFAULT_TASK_ARGS["quality_cache_dir"],
     quality_tau:             float = DEFAULT_TASK_ARGS["quality_tau"],
     quality_concurrency:     int = DEFAULT_TASK_ARGS["quality_concurrency"],
     quality_baseline_max_attempts: int = DEFAULT_TASK_ARGS["quality_baseline_max_attempts"],
@@ -83,8 +80,6 @@ def inference_bench(
     if type(quality_tau) not in {int, float} or not math.isfinite(quality_tau) or not 0 < quality_tau <= 1:
         raise ValueError("quality_tau must be finite and in (0, 1]")
     config = load_config(f"run_configs/{config_defaults}.yaml")
-    reference = load_quality_cache(options)
-    options["quality_cache"] = str(reference) if reference is not None else None
 
     # Setup and grading stay in place when a caller replaces the solver.
     return Task(

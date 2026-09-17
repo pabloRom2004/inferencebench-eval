@@ -23,7 +23,7 @@ uv run modal token new  # Authenticate the default GPU provider
 
 > [!NOTE]
 >
-> Both configs include cached long prompts and the 500-question MMLU-Pro reference for Mistral 7B at seed 248. Speed-baseline measurement and the submitted server's quality check still run on the GPU.
+> Both configs include cached long prompts. Each attempt measures the Transformers speed baseline and the 500-question MMLU-Pro reference on its own GPU before optimization starts, then checks the submitted server's quality after restart. The reference measurement takes about an hour on an H100.
 
 Replace `provider/model` with your Inspect model identifier. Run ReAct: **(Recommended way to run the eval)**
 
@@ -74,7 +74,7 @@ View results with `uv run inspect view --log-dir logs`.
 
 Edit or copy one of the configs below and pass its path to `--run-config`. Override task arguments with `-T`, harness arguments with `-S`, and generation/evaluation settings with CLI flags, e.g. `--token-limit 5000000 --epochs 1`. Use `uv run inspect eval --help` for all options.
 
-To change benchmark prompt wording, edit the named `Prompt` objects in [prompts.py](src/inferencebench/prompts.py). Provider setup and cache preparation are in the [implementation guide](docs/implementation.md). The [fidelity review](docs/fidelity.md) traces the task, subject, judge, and differences from the paper.
+To change benchmark prompt wording, edit the named `Prompt` objects in [prompts.py](src/inferencebench/prompts.py). Provider setup and request-cache preparation are in the [implementation guide](docs/implementation.md). The [fidelity review](docs/fidelity.md) traces the task, subject, judge, and differences from the paper.
 
 ## Parameters
 
@@ -122,7 +122,6 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
 - `request_cache`: bundled prompts; original uses its full-workload cache. `null` enables corpus sampling.
 - `quality_samples`, `quality_seed`: `500`, `248`.
-- `quality_cache`: `auto`; reuse a matching bundled or local reference.
 - `quality_tau`: required fraction of reference accuracy; `0.95`.
 
 Generation (`generate_config`):
@@ -148,17 +147,21 @@ The separate integrity judge uses GPT-6 Astra by default and Claude Sonnet 4.6 i
 
 Four [scenarios](src/inferencebench/assets/datasets/scenarios.json), with one seed pair by default and three in the original configuration. The default selects A; all scenarios give four or twelve samples respectively. Original request counts are A: 128, B: 64, C: 256 per profile, D: 96.
 
-[Assets](src/inferencebench/assets) contain prompts, dataset caches, scripts, and licenses. The bundled MMLU-Pro `.eval` and JSON summary record 151/500 correct. For another model or quality seed, run `uv run python -m inferencebench.prepare_quality --run-config my-run.yaml` first; custom references are cached under gitignored `.cache/inferencebench/mmlu_pro/`.
+[Assets](src/inferencebench/assets) contain prompts, the LongBench request cache, scripts, and licenses. The MMLU-Pro reference is measured on the Transformers server inside every attempt; a measurement on 2026-09-10 recorded 151/500 correct.
 
 ## Scoring
 
-![InferenceBench flow: Prompt → Agent → Grader, with development feedback, scenario objectives, cached references, and final quality and integrity checks.](docs/grading-flow.svg)
+![InferenceBench flow: Prompt → Agent → Grader, with development feedback, scenario objectives, cached prompts, and final quality and integrity checks.](docs/grading-flow.svg)
 
 The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring restarts the saved submission, measures held-out speed and MMLU-Pro accuracy, and judges integrity. **speedup** divides the scenario objective by its same-run Transformers baseline. **aggregate_speedup** averages epochs, then seeds within scenarios, and geometrically averages scenario means.
 
 Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailable integrity judgments remain unscored; infrastructure failures remain Inspect errors. Report incomplete runs with their completed, scored, and unscored attempt counts.
 
 ## Changelog
+
+### [14] - 2026-09-17
+
+- Remove the bundled MMLU-Pro reference cache and its preparation CLI; every attempt measures the Transformers quality reference on its own GPU.
 
 ### [13] - 2026-09-12
 

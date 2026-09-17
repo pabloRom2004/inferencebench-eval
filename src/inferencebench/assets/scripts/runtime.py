@@ -101,7 +101,7 @@ def prepare_requests(options, config, name):
 
 
 def prepare(options):
-    """Cache datasets, measure the Transformers baseline, and install the original empty launcher before timing starts."""
+    """Cache datasets, measure the Transformers speed and quality baselines, and install the original empty launcher before timing starts."""
     from huggingface_hub import snapshot_download
     from inference import (
         baseline_eval,
@@ -116,9 +116,6 @@ def prepare(options):
         options["base_model"],
         ignore_patterns=["*.pt", "*.bin", "original/*"],
     )
-    reference = options.get("quality_cache_provenance")
-    if reference is not None and Path(snapshot).name != reference["model_revision"]:
-        raise RuntimeError("Model revision differs from the cached MMLU-Pro reference; rebuild the reference before running this model")
     ARTIFACTS.mkdir(exist_ok=True)
     for name in ["scenario.json", "mission.txt", "benchmark.txt"]:
         shutil.copy(ROOT / "src/eval/tasks" / options["directory"] / name, TASK / name)
@@ -132,10 +129,7 @@ def prepare(options):
                 cache_samples.cache_longbench_v2(path, seed, 503)
     specs, _, _ = quality_gate.get_quality_specs()
     spec = specs[0]
-    if not spec.samples_file.exists():
-        if options.get("quality_cache") is not None:
-            raise RuntimeError("Cached MMLU-Pro questions were not transferred to the sandbox")
-        cache_samples.cache_mmlu_pro(spec.samples_file, spec.seed, spec.limit)
+    cache_samples.cache_mmlu_pro(spec.samples_file, spec.seed, spec.limit)
 
     with baseline_server(options):
         config = runner.load_scenario_config(TASK)
@@ -162,8 +156,7 @@ def prepare(options):
                 "Transformers baseline returned no successful requests"
             )
 
-        if options.get("quality_cache") is None:
-            prepare_quality_baseline(options, spec)
+        prepare_quality_baseline(options, spec)
 
     # Give the agent a separate development request set.
     config["dataset_seed"] = options["dev_seed"]
@@ -171,8 +164,6 @@ def prepare(options):
     precompute_baseline._write_requests_jsonl(TASK / "requests.jsonl", dev_requests)
     # Record resolved weights and the exact evaluated inputs without claiming historical data pins.
     provenance = {"downloaded_model_revision": Path(snapshot).name, "input_sha256": {}}
-    if options.get("quality_cache_provenance") is not None:
-        provenance["quality_cache"] = options["quality_cache_provenance"]
     if options.get("request_cache_provenance") is not None:
         provenance["request_cache"] = options["request_cache_provenance"]
     for path in [
@@ -221,38 +212,6 @@ def baseline_server(options):
                 except subprocess.TimeoutExpired:
                     os.killpg(server.pid, signal.SIGKILL)
                     server.wait()
-
-
-def quality_reference(options):
-    """Measure only the MMLU-Pro reference, preserving all requests and model provenance."""
-    from huggingface_hub import snapshot_download
-    from inference import cache_samples, quality_gate
-
-    started = time.time()
-    ARTIFACTS.mkdir(exist_ok=True)
-    snapshot = snapshot_download(
-        options["base_model"], ignore_patterns=["*.pt", "*.bin", "original/*"]
-    )
-    specs, _, _ = quality_gate.get_quality_specs()
-    spec = specs[0]
-    cache_samples.cache_mmlu_pro(spec.samples_file, spec.seed, spec.limit)
-    with baseline_server(options):
-        prepare_quality_baseline(options, spec)
-    shutil.copy(ARTIFACTS / "quality-baseline/resolved_generations.jsonl", ARTIFACTS / "resolved_generations.jsonl")
-    provenance = {
-        "downloaded_model_revision": Path(snapshot).name,
-        "started_at_unix": started,
-        "completed_at_unix": time.time(),
-        "upstream_revision": subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip(),
-        "reference_options": options,
-        "server_versions": json.loads(subprocess.check_output([
-            "python3", "-c",
-            "import importlib.metadata as m, json; print(json.dumps({name: m.version(name) for name in ['torch', 'transformers']}))",
-        ], text=True)),
-        "input_sha256": {"quality-samples.jsonl": hashlib.sha256(spec.samples_file.read_bytes()).hexdigest()},
-        "gpu": subprocess.check_output(["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv"], text=True),
-    }
-    (ARTIFACTS / "provenance.json").write_text(json.dumps(provenance, indent=2))
 
 
 def prepare_quality_baseline(options, spec):
@@ -399,12 +358,12 @@ def final(options):
 def main():
     """Dispatch a trusted preparation or final-scoring operation from explicit JSON options."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=["prepare", "quality-reference", "final"])
+    parser.add_argument("operation", choices=["prepare", "final"])
     parser.add_argument("options")
     args = parser.parse_args()
     options = json.loads(Path(args.options).read_text())
     os.environ.update(environment(options))
-    {"prepare": prepare, "quality-reference": quality_reference, "final": final}[args.operation](options)
+    {"prepare": prepare, "final": final}[args.operation](options)
 
 
 if __name__ == "__main__":

@@ -57,8 +57,8 @@ def remove_mock_logs():
 
 def test_provider_selection():
     """Keep Modal as the default and select the complete RunPod provider configuration explicitly."""
-    assert inference_bench(quality_cache=None).sandbox.type == "inferencebench_modal"
-    task = inference_bench(gpu_provider="runpod", quality_cache=None)
+    assert inference_bench().sandbox.type == "inferencebench_modal"
+    task = inference_bench(gpu_provider="runpod")
     assert task.sandbox.type == "inferencebench_runpod"
     assert task.sandbox.config.endswith("runpod.yaml")
     assert task.dataset[0].metadata["gpu_provider"] == "runpod"
@@ -696,7 +696,7 @@ sha256sum -c /tmp/capacity.sha256
         scenarios="A",
         seed_pairs=[[21, 1337]],
         request_limit=1,
-        quality_samples=16, quality_cache=None,
+        quality_samples=16,
     )
     task.solver = (
         react_agent(nudge_prompt=False, token_budget_reminder=False)

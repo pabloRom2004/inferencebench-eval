@@ -37,7 +37,6 @@ inferencebench = [
     "assets/scripts/*.sh",
     "assets/datasets/*.json",
     "assets/datasets/longbench/*.gz",
-    "assets/datasets/mmlu_pro/*/*",
     "compose.yaml", "runpod.yaml", "Dockerfile", "eval.yaml",
 ]
 

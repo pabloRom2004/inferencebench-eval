@@ -9,7 +9,6 @@ __pycache__/
 .env
 logs/
 run-artifacts/
-.cache/inferencebench/
 build/
 dist/
 .DS_Store
