@@ -1524,7 +1524,10 @@ def test_judge_transcript_toggle(
         if event.event == "model" and event.model == "mockllm/transcript-judge"
     )
     assert ("agent-transcript.json" in initial.input[0].text) is enabled
-    assert launcher in initial.input[0].text
+    if args["scorer"]["args"]["preload_evidence"]:
+        assert "## Contents of `start_server.sh`" in initial.input[0].text
+    else:
+        assert launcher in initial.input[0].text
     reads = [
         event
         for event in sample.events
