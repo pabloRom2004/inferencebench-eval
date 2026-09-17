@@ -32,9 +32,11 @@ task:
         judge_prompt: original_judge
         max_grader_attempts: 3
         include_transcript: true
-        # Original-judge evidence: inline launcher and server-log tail, plus shell access.
-        preload_evidence: false
-        judge_shell: false
+        # One prompt line points the judge at the exported transcript.
+        transcript_hint: true
+        # Released-judge evidence: inline launcher and server-log tail, plus shell access.
+        preload_evidence: true
+        judge_shell: true
 
 solver:
   # CLI: --solver inferencebench/cli_agent -S harness=claude_code

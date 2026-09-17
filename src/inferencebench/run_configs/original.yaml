@@ -30,7 +30,9 @@ task:
         grader_role: integrity
         judge_prompt: original_judge
         max_grader_attempts: 3
-        include_transcript: false
+        # The transcript is exported but, as in the released harness, never mentioned.
+        include_transcript: true
+        transcript_hint: false
         preload_evidence: true
         judge_shell: true
 

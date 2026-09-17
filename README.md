@@ -142,7 +142,7 @@ Evaluation (`eval_config`):
 - `time_limit`: native attempt deadline; `null`. The original uses `agent_seconds` above.
 - `max_samples`: concurrent attempts; `1`.
 
-The separate integrity judge uses GPT-6 Astra by default and Claude Sonnet 4.6 in the original config; change `model_roles.integrity` to replace it. The original config also inlines the launcher and server-log tail into the judge prompt and gives the judge shell access, as the released harness does.
+The separate integrity judge uses GPT-6 Astra by default and Claude Sonnet 4.6 in the original config; change `model_roles.integrity` to replace it. Both configs inline the launcher and server-log tail into the judge prompt, give the judge shell access, and export the agent transcript into the scoring sandbox, matching the released container where the CLI session logs sat unreferenced; only the default config's prompt points the judge at that transcript.
 
 ## Dataset
 
@@ -164,7 +164,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 
 - Remove the bundled MMLU-Pro reference cache and its preparation CLI; every attempt measures the quality reference on its own GPU.
 - Add `quality_reference_backend`: the default measures the reference with a pinned vLLM 0.19.0 server; `original.yaml` keeps the Transformers server.
-- Add `preload_evidence` and `judge_shell` scorer settings so `original.yaml` reproduces the released judge's inline evidence and shell access.
+- Give both configs the released judge's inline evidence and shell access (`preload_evidence`, `judge_shell`) and export the transcript in both; `transcript_hint` mentions it only in the default prompt.
 
 ### [13] - 2026-09-12
 

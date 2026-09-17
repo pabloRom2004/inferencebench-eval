@@ -101,6 +101,7 @@ async def judge_submission(
     include_transcript: bool,
     preload_evidence: bool = False,
     judge_shell: bool = False,
+    transcript_hint: bool = False,
 ) -> tuple[bool | None, str, dict[str, Any]]:
     """Apply the upstream integrity rubric with a role-bound judge and read-only filesystem tools."""
 
@@ -172,7 +173,7 @@ async def judge_submission(
     prompt += "\n\n" + adapter.prompt.format(remote=REMOTE)
     if judge_shell:
         prompt += "\n\n" + JUDGE_SHELL.prompt
-    if include_transcript:
+    if transcript_hint:
         prompt += "\n\n" + JUDGE_TRANSCRIPT.prompt.format(remote=REMOTE)
 
     # A runtime role binding takes precedence over the YAML default.
@@ -208,6 +209,7 @@ async def judge_submission(
             "include_transcript": include_transcript,
             "preloaded_evidence": evidence_names,
             "judge_shell": judge_shell,
+            "transcript_hint": transcript_hint,
         }
         if verdict is not None:
             return verdict, result, details
@@ -223,14 +225,17 @@ def inference_speedup(
     include_transcript: bool = DEFAULT_SCORER_ARGS["include_transcript"],
     preload_evidence: bool = DEFAULT_SCORER_ARGS["preload_evidence"],
     judge_shell: bool = DEFAULT_SCORER_ARGS["judge_shell"],
+    transcript_hint: bool = DEFAULT_SCORER_ARGS["transcript_hint"],
 ) -> Scorer:
     """Score held-out inference speed relative to Transformers after restart, quality, and integrity checks."""
     select_prompt(judge_prompt, "judge_prompt")
     if type(max_grader_attempts) is not int or max_grader_attempts < 1:
         raise ValueError("max_grader_attempts must be a positive integer")
-    for name, value in [("include_transcript", include_transcript), ("preload_evidence", preload_evidence), ("judge_shell", judge_shell)]:
+    for name, value in [("include_transcript", include_transcript), ("preload_evidence", preload_evidence), ("judge_shell", judge_shell), ("transcript_hint", transcript_hint)]:
         if type(value) is not bool:
             raise ValueError(f"{name} must be a boolean")
+    if transcript_hint and not include_transcript:
+        raise ValueError("transcript_hint requires include_transcript")
 
     async def score(state, target):
         """Retain raw final measurements and distinguish invalid submissions from unavailable judgments."""
@@ -297,6 +302,7 @@ def inference_speedup(
                 include_transcript,
                 preload_evidence,
                 judge_shell,
+                transcript_hint,
             )
             metadata["integrity_judgment"] = judgment
             metadata["integrity_judge"] = details

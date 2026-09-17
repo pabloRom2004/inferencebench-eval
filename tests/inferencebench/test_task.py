@@ -165,12 +165,10 @@ def test_config_dataset_and_provenance():
         for key, value in config["task"]["args"].items()
         if key not in differing_args
     }
-    assert config["task"]["args"]["scorer"]["args"]["include_transcript"] is True
+    assert config["task"]["args"]["scorer"]["args"]["transcript_hint"] is True
     assert original["task"]["args"]["scorer"]["args"] == {
         **config["task"]["args"]["scorer"]["args"],
-        "include_transcript": False,
-        "preload_evidence": True,
-        "judge_shell": True,
+        "transcript_hint": False,
     }
     assert original["solver"]["args"]["version"] == "2.1.114"
 
@@ -1153,8 +1151,9 @@ def test_bound_judge_configuration(local_task, tmp_path):
         "role": "integrity",
         "attempts": 1,
         "include_transcript": True,
-        "preloaded_evidence": [],
-        "judge_shell": False,
+        "preloaded_evidence": ["start_server.sh", "server.log"],
+        "judge_shell": True,
+        "transcript_hint": True,
     }
 
 
@@ -1384,7 +1383,7 @@ def test_replacement_cleanup_after_artifact_failure(local_task, monkeypatch):
 
 @pytest.mark.parametrize(
     "config_defaults,override",
-    [("default", None), ("original", None), ("default", False), ("original", True)],
+    [("default", None), ("original", None), ("default", False), ("original", False)],
 )
 @pytest.mark.parametrize("compacted", [False, True])
 @pytest.mark.parametrize("hawk", [False, True])
@@ -1403,7 +1402,9 @@ def test_judge_transcript_toggle(
     args = load_config(f"run_configs/{config_defaults}.yaml")["task"]["args"]
     if override is not None:
         args["scorer"]["args"]["include_transcript"] = override
+        args["scorer"]["args"]["transcript_hint"] = override
     enabled = args["scorer"]["args"]["include_transcript"]
+    hinted = args["scorer"]["args"]["transcript_hint"]
     task = inference_bench(**{**args, "scenarios": "A", "seed_pairs": [[21, 1337]]})
     task.sandbox = None
 
@@ -1523,7 +1524,7 @@ def test_judge_transcript_toggle(
         for event in sample.events
         if event.event == "model" and event.model == "mockllm/transcript-judge"
     )
-    assert ("agent-transcript.json" in initial.input[0].text) is enabled
+    assert ("agent-transcript.json" in initial.input[0].text) is hinted
     if args["scorer"]["args"]["preload_evidence"]:
         assert "## Contents of `start_server.sh`" in initial.input[0].text
     else:
@@ -1569,12 +1570,19 @@ def test_judge_transcript_toggle(
 
 
 @pytest.mark.parametrize("value", [None, "false", 0])
-@pytest.mark.parametrize("setting", ["include_transcript", "preload_evidence", "judge_shell"])
+@pytest.mark.parametrize("setting", ["include_transcript", "preload_evidence", "judge_shell", "transcript_hint"])
 def test_invalid_judge_toggles(setting, value):
     """Reject ambiguous judge evidence settings before creating a scoring sandbox."""
     args = load_config()["task"]["args"]["scorer"]["args"]
     with pytest.raises(ValueError, match=f"{setting} must be a boolean"):
         SCORERS.inference_speedup(**{**args, setting: value})
+
+
+def test_transcript_hint_requires_export():
+    """Refuse to point the judge at a transcript that will not exist in the scoring sandbox."""
+    args = load_config()["task"]["args"]["scorer"]["args"]
+    with pytest.raises(ValueError, match="transcript_hint requires include_transcript"):
+        SCORERS.inference_speedup(**{**args, "include_transcript": False, "transcript_hint": True})
 
 
 @pytest.mark.parametrize("missing_launcher", [False, True])
@@ -1600,7 +1608,7 @@ def test_original_judge_evidence_and_shell(local_task, monkeypatch, missing_laun
 
     env.read_file = read_file
     args = load_config("run_configs/original.yaml")["task"]["args"]
-    assert args["scorer"]["args"] == {**args["scorer"]["args"], "preload_evidence": True, "judge_shell": True, "include_transcript": False}
+    assert args["scorer"]["args"] == {**args["scorer"]["args"], "preload_evidence": True, "judge_shell": True, "include_transcript": True, "transcript_hint": False}
     task = inference_bench(**{**args, "scenarios": "A", "seed_pairs": [[21, 1337]], "agent_seconds": 2})
     task.sandbox = None
     judge = get_model(
@@ -1628,7 +1636,7 @@ def test_original_judge_evidence_and_shell(local_task, monkeypatch, missing_laun
     assert any(call.args[0] == ["bash", "-lc", "cd /home/agent/task && ls"] for call in env.exec.await_args_list)
     details = sample.scores["inference_speedup"].metadata["integrity_judge"]
     assert details["preloaded_evidence"] == (["server.log"] if missing_launcher else ["start_server.sh", "server.log"])
-    assert details["judge_shell"] is True and details["include_transcript"] is False
+    assert details["judge_shell"] is True and details["include_transcript"] is True and details["transcript_hint"] is False
 
 
 @pytest.mark.parametrize("failure", ["solver", "connection"])

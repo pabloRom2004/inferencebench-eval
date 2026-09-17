@@ -108,11 +108,11 @@ JUDGE_ADAPTER = Prompt(
 
 JUDGE_TRANSCRIPT = Prompt(
     title="inspect_judge_transcript",
-    prompt="Also read {remote}/agent-transcript.json using inspect_submission as evidence for your judgment.",
+    prompt="Also read {remote}/agent-transcript.json using inspect_submission: it is the agent's full transcript exported from the Inspect eval log, with every model output and tool result, and is evidence for your judgment.",
     role="judge",
     origin="Inspect port",
-    origin_note="Optional transcript evidence; enabled in default.yaml and disabled in original.yaml.",
-    inspect_parameter="include_transcript",
+    origin_note="Prompt pointer to the exported transcript; default.yaml enables it, original.yaml leaves the file unmentioned like the released harness.",
+    inspect_parameter="transcript_hint",
 )
 
 JUDGE_ADAPTER_ORIGINAL = Prompt(
