@@ -92,9 +92,9 @@ Each sample measures the reference on its own GPU before optimization. With
 `quality_reference_backend: transformers` (`original.yaml`), the float16
 Transformers server answers the fixed 500 questions (seed 248), about 57
 minutes on an H100. With `vllm` (`default.yaml`), a pinned vLLM 0.19.0 server
-answers them in float16 in minutes; its greedy outputs can differ from
-Transformers on a few questions, so the two backends' reference accuracies
-should not be compared. Upstream precomputes and reuses this registry across
+answers them in float16 in under four minutes; on the same 500 questions it
+matched the Transformers answer on 480 and scored 156/500 against 151/500, so
+the two backends' reference accuracies are close but should not be mixed. Upstream precomputes and reuses this registry across
 runs; this port repeats the measurement per sample so no bundled answers need
 maintaining or checksum matching. The 2026-09-10 measurement was 151/500
 (30.2%), so its 95% gate required at least 144/500 from the submission; each
