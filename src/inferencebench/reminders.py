@@ -62,7 +62,8 @@ def with_deadline(solve: Solver | Agent):
         try:
             async with deadline:
                 return await solve(state, *args)
-        except TimeoutError:
+        except Exception:
+            # A transfer or tool cut off by the deadline can surface as another error type.
             if not deadline.expired():
                 raise
             state.metadata["agent_deadline_reached"] = True

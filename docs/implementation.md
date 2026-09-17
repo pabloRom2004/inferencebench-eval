@@ -150,7 +150,6 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `seed_pairs` | `[[21,1337]]` | Development and held-out evaluation seeds; `original.yaml` retains three pairs |
 | `base_model` | `mistralai/Mistral-7B-Instruct-v0.3` | Fixed model checkpoint for the benchmark |
 | `max_model_len` | 32768 | Original evaluator and baseline context limit |
-| `reuse_speed_baseline` | `true` | Measure the PyTorch speed baseline once per scenario, seed pair, model, precision, evaluator revision and GPU model, store it under `run-artifacts/baselines/` on the controller, and upload it to later attempts; `false` measures it inside every attempt |
 | `baseline_dtype` | `float16` | Precision of the Transformers speed baseline and the reference server; `bfloat16` for bf16-native models |
 | `context_length` | `null` | Optimizing model's context window; used by Inspect compaction and model bridges |
 | `agent_seconds` | `null` | Optional optimization wall-clock limit; `original.yaml` uses 7200 seconds |
@@ -223,7 +222,7 @@ Start with [task.py](../src/inferencebench/task.py), which connects these module
 | [assets/scripts/runtime.py](../src/inferencebench/assets/scripts/runtime.py) | Thin adapter calling the original evaluator inside the GPU container |
 | [scorers.py](../src/inferencebench/scorers.py), [metrics.py](../src/inferencebench/metrics.py) | Final measurements, integrity judgment, and aggregation |
 
-The execution order is **look up or measure the speed baseline → measure the quality reference → run agent → restart server → measure and judge**. Tests are in `tests/inferencebench/`.
+The execution order is **look up or measure the speed baseline → measure the quality reference → run agent → restart server → measure and judge**. The PyTorch speed baseline is measured once per scenario, seed pair, model, precision, evaluator revision and GPU model, stored under `run-artifacts/baselines/` on the controller with the measuring sample and GPU inventory in its manifest, and uploaded to later attempts, which skip the measurement and record `speed_baseline: cached` in their provenance; upstream's precomputed registry works the same way. Tests are in `tests/inferencebench/`.
 
 Packaged assets are grouped by purpose:
 

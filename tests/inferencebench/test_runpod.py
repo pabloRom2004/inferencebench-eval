@@ -785,3 +785,26 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
     assert not docker_pods.pods
     assert any(path.endswith("/restart") for method, path in docker_pods.calls)
     assert sum(path.endswith("/restart") for method, path in docker_pods.calls) == 1
+
+
+async def test_sftp_allowance_scales_with_payload(provider, monkeypatch):
+    """Give large transfers time proportional to their size and report a cut-off transfer as a timeout."""
+    from contextlib import asynccontextmanager
+
+    assert provider.transfer_allowance(0) == provider.config["api_timeout_seconds"]
+    assert provider.transfer_allowance(150 * 1024 * 1024) >= 600
+
+    class Connection:
+        """Fail the file channel the way asyncssh does when the timeout cancels it."""
+
+        def start_sftp_client(self):
+            raise RuntimeError("")
+
+    @asynccontextmanager
+    async def connect():
+        """Hand out the failing connection without touching the network."""
+        yield Connection()
+
+    monkeypatch.setattr(provider, "_connect", connect)
+    with pytest.raises(TimeoutError, match="allowance"):
+        await provider.write_file("bundle.tar.gz", b"data")

@@ -640,7 +640,6 @@ def test_registered_yaml_solver(local_task, monkeypatch, tmp_path):
         {"quality_reference_backend": "sglang"},
         {"strict_prompt": "yes"},
         {"baseline_dtype": "int8"},
-        {"reuse_speed_baseline": "yes"},
     ],
 )
 def test_invalid_workload_arguments(options):
@@ -1829,10 +1828,6 @@ def test_speed_baseline_reuse(monkeypatch, tmp_path):
     run(seed_pairs=[[21, 428]])
     assert prepares[-1]["cached_speed_baseline"] is False and len(list((tmp_path / "baselines").iterdir())) == 2
 
-    uploads.clear()
-    run(reuse_speed_baseline=False)
-    assert prepares[-1]["cached_speed_baseline"] is False and uploads == []
-
 
 @pytest.mark.parametrize("backend", ["transformers", "vllm"])
 def test_prepare_skips_measurement_for_shared_baseline(monkeypatch, tmp_path, backend):
@@ -1880,3 +1875,31 @@ def test_prepare_skips_measurement_for_shared_baseline(monkeypatch, tmp_path, ba
     assert sampled == [options["dev_seed"]]
     assert launches == (["transformers"] if backend == "transformers" else ["serve"])
     assert json.loads((tmp_path / "provenance.json").read_text())["speed_baseline"] == "cached"
+
+
+async def test_deadline_absorbs_failures_after_expiry(monkeypatch):
+    """Treat any failure surfacing once the budget has expired as the budget ending, and re-raise earlier failures."""
+    from inferencebench import reminders
+
+    state = SimpleNamespace(metadata={})
+    end = time.time() + 0.2
+    monkeypatch.setattr(reminders, "store", lambda: SimpleNamespace(get=lambda key: end))
+
+    async def cut_off(state, generate):
+        """Mimic asyncssh turning the deadline's cancellation into an empty RuntimeError."""
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            raise RuntimeError("") from None
+
+    assert await reminders.with_deadline(cut_off)(state, None) is state
+    assert state.metadata["agent_deadline_reached"] is True
+
+    end = time.time() + 10
+
+    async def broken(state, generate):
+        """Fail well before the deadline."""
+        raise RuntimeError("real failure")
+
+    with pytest.raises(RuntimeError, match="real failure"):
+        await reminders.with_deadline(broken)(state, None)

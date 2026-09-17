@@ -24,6 +24,9 @@ from inspect_ai.util import (
 from inferencebench.prompts import ASSETS
 from inferencebench.run_config import load_config
 
+# Slowest link the transfer allowance assumes; larger payloads get proportionally more time.
+TRANSFER_FLOOR_BYTES_PER_SECOND = 256 * 1024
+
 
 @sandboxenv(name="inferencebench_runpod")
 class RunPodSandbox(SandboxEnvironment):
@@ -455,33 +458,44 @@ class RunPodSandbox(SandboxEnvironment):
                 drainer.cancel()
             await asyncio.gather(*drainers, return_exceptions=True)
 
+    def transfer_allowance(self, transfer_bytes: int) -> float:
+        """Allow the base API timeout plus the time a slow link needs to move the payload."""
+        return self.config["api_timeout_seconds"] + transfer_bytes / TRANSFER_FLOOR_BYTES_PER_SECOND
+
     @asynccontextmanager
-    async def _sftp(self):
-        """Open an authenticated file channel and preserve Inspect's file-error semantics."""
+    async def _sftp(self, transfer_bytes: int = 0):
+        """Open an authenticated file channel with a time allowance scaled to the transfer size."""
+        allowance = self.transfer_allowance(transfer_bytes)
         try:
             async with self._connect() as connection:
-                async with asyncio.timeout(self.config["api_timeout_seconds"]):
+                async with asyncio.timeout(allowance):
                     async with connection.start_sftp_client() as sftp:
                         yield sftp
         except asyncssh.SFTPNoSuchFile as error:
             raise FileNotFoundError(str(error)) from error
         except asyncssh.SFTPPermissionDenied as error:
             raise PermissionError(str(error)) from error
+        except RuntimeError as error:
+            # asyncssh reports a transfer cut off by the timeout as an empty RuntimeError.
+            if str(error):
+                raise
+            raise TimeoutError(
+                f"RunPod SFTP transfer exceeded its {allowance:.0f}s allowance"
+            ) from error
 
     async def write_file(self, file: str, contents: str | bytes) -> None:
         """Write binary or UTF-8 content through SFTP, creating its parent directories."""
         path = str(PurePosixPath("/home/agent/task") / file)
-        async with self._sftp() as sftp:
+        data = contents.encode() if isinstance(contents, str) else contents
+        async with self._sftp(len(data)) as sftp:
             await sftp.makedirs(str(PurePosixPath(path).parent), exist_ok=True)
             async with sftp.open(path, "wb") as remote:
-                await remote.write(
-                    contents.encode() if isinstance(contents, str) else contents
-                )
+                await remote.write(data)
 
     async def read_file(self, file: str, text: bool = True) -> str | bytes:
         """Read a file with Inspect's size limit, raising rather than returning truncated data."""
         path = str(PurePosixPath("/home/agent/task") / file)
-        async with self._sftp() as sftp:
+        async with self._sftp(SandboxEnvironmentLimits.MAX_READ_FILE_SIZE) as sftp:
             if (await sftp.stat(path)).type == asyncssh.FILEXFER_TYPE_DIRECTORY:
                 raise IsADirectoryError(path)
             async with sftp.open(path, "rb") as remote:
@@ -496,10 +510,10 @@ class RunPodSandbox(SandboxEnvironment):
 
     async def download(self, remote: str, local: str) -> None:
         """Transfer trusted evaluator artifacts without embedding binary contents in tool output."""
-        async with self._sftp() as sftp:
+        async with self._sftp(4 * 1024**3) as sftp:
             await sftp.get(remote, local)
 
     async def upload(self, local: str, remote: str) -> None:
         """Restore a host artifact into the restarted pod through SFTP."""
-        async with self._sftp() as sftp:
+        async with self._sftp(Path(local).stat().st_size) as sftp:
             await sftp.put(local, remote)

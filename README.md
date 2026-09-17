@@ -120,7 +120,6 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `base_model`: `mistralai/Mistral-7B-Instruct-v0.3`. Any Hugging Face checkpoint the evaluator's Transformers stack can load; see the [implementation guide](docs/implementation.md#changing-the-base-model).
 - `baseline_dtype`: precision of the Transformers speed baseline and the reference server; `float16` (upstream). Use `bfloat16` for bf16-native models.
 - `context_length`: optimizing model's context window; `null` uses Inspect's metadata. Set `1048576` for DeepSeek V4.1 Flash.
-- `reuse_speed_baseline`: measure the PyTorch speed baseline once per scenario, seed pair and GPU model and reuse it from `run-artifacts/baselines/`, as upstream's precomputed registry does; `true`. `false` measures it inside every attempt.
 - `strict_prompt`: insert the leaderboard's strict rules (no third-party pre-quantized checkpoints, no modifying the evaluation harness) after the base-model constraint; `true`. The paper's Table 2 used the plain prompt; the site's dagger-marked rows used a strict prompt whose text is unreleased, so the wording is the port's.
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
 - `quality_samples`, `quality_seed`: `500`, `248`.
@@ -156,7 +155,7 @@ Four [scenarios](src/inferencebench/assets/datasets/scenarios.json), with one se
 
 ![InferenceBench flow: Prompt → Agent → Grader, with development feedback, scenario objectives, sampled prompts, and final quality and integrity checks.](docs/grading-flow.svg)
 
-The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring restarts the saved submission, measures held-out speed and MMLU-Pro accuracy, and judges integrity. **speedup** divides the scenario objective by its same-run Transformers baseline. **aggregate_speedup** averages epochs, then seeds within scenarios, and geometrically averages scenario means.
+The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring restarts the saved submission, measures held-out speed and MMLU-Pro accuracy, and judges integrity. **speedup** divides the scenario objective by the Transformers baseline for that scenario, seed pair and GPU model, measured by the first attempt that needs it and shared with later attempts. **aggregate_speedup** averages epochs, then seeds within scenarios, and geometrically averages scenario means.
 
 Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailable integrity judgments remain unscored; infrastructure failures remain Inspect errors. Report incomplete runs with their completed, scored, and unscored attempt counts.
 
@@ -164,7 +163,8 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 
 ### [14] - 2026-09-17
 
-- Add `reuse_speed_baseline` (default `true`): the naive PyTorch speed baseline is measured once per scenario, seed pair and GPU model and shared by later attempts, matching upstream's precomputed baselines.
+- Measure the naive PyTorch speed baseline once per scenario, seed pair and GPU model and share it with later attempts from `run-artifacts/baselines/`, matching upstream's precomputed baselines.
+- Scale RunPod SFTP transfer time with payload size, so CLI bundle uploads such as OpenCode's no longer hit the 30-second API timeout, and end the agent budget cleanly when a transfer is cut off at the deadline.
 - Pin `datasets<4` in the sandbox image; upstream's MMLU-Pro and LongBench samplers pass `trust_remote_code`, which newer releases reject.
 - Remove the bundled MMLU-Pro reference cache and its preparation CLI; every attempt measures the quality reference on its own GPU.
 - Add `quality_reference_backend`: the default measures the reference with a pinned vLLM 0.19.0 server; `original.yaml` keeps the Transformers server.

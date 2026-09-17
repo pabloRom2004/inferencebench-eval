@@ -186,7 +186,7 @@ def prepare_environment() -> Solver:
         )
         # Reuse a speed baseline already measured for this workload on this GPU model.
         identity = speed_baseline_identity(state.metadata, gpu_model(inventory))
-        cached = cached_speed_baseline(identity) if state.metadata["reuse_speed_baseline"] else None
+        cached = cached_speed_baseline(identity)
         state.metadata["cached_speed_baseline"] = cached is not None
         if cached is not None:
             for name in SPEED_BASELINE_FILES:
@@ -232,7 +232,7 @@ def prepare_environment() -> Solver:
         state.metadata["provenance"] = json.loads(
             (folder / "provenance.json").read_text()
         )
-        if state.metadata["reuse_speed_baseline"] and cached is None:
+        if cached is None:
             try:
                 await env.download(f"{REMOTE}/baseline-generations.jsonl", str(folder / "baseline-generations.jsonl"))
             except Exception as error:

@@ -12,8 +12,6 @@ task:
     max_model_len: 32768
     # Precision of the Transformers speed baseline and the reference server; use bfloat16 for bf16-native models.
     baseline_dtype: float16
-    # Measure the PyTorch speed baseline once per scenario, seed pair, and GPU model, then reuse it, as upstream's precomputed registry does.
-    reuse_speed_baseline: true
     # Optimizing agent's context window; null uses Inspect's model metadata.
     context_length: null
     agent_seconds: 7200
