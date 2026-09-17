@@ -48,6 +48,7 @@ def inference_bench(
 
     # Prompt and scoring.
     system_prompt:           str = DEFAULT_TASK_ARGS["system_prompt"],
+    strict_prompt:           bool = DEFAULT_TASK_ARGS["strict_prompt"],
     scorer:                  dict[str, Any] = DEFAULT_TASK_ARGS["scorer"],
 ) -> Task:
     """Optimize Mistral inference for four workloads on one H100 using the original evaluator."""
@@ -75,6 +76,8 @@ def inference_bench(
         raise ValueError("quality_seed must be a nonnegative integer")
     if quality_reference_backend not in {"transformers", "vllm"}:
         raise ValueError("quality_reference_backend must be transformers or vllm")
+    if type(strict_prompt) is not bool:
+        raise ValueError("strict_prompt must be a boolean")
     durations = [server_wait_seconds, request_timeout_seconds]
     if agent_seconds is not None:
         durations.append(agent_seconds)

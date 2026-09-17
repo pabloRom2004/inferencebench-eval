@@ -59,6 +59,18 @@ PROMPTS = {
     ),
 }
 
+STRICT_RULES = Prompt(
+    title="strict_rules",
+    prompt=(
+        "* Checkpoints: Do not download or serve third-party pre-quantized, distilled, or fine-tuned checkpoints of {model}, even under its name; if you want lower precision, quantize the provided weights yourself.\n"
+        "* Evaluation harness: Do not modify, replace, wrap, or bypass evaluate.py, the evaluator under /opt/inference_eval, or any task-provided requests or quality data."
+    ),
+    role="subject",
+    origin="Inspect port; the leaderboard's strict-prompt footnote at https://inferencebench.ai (retrieved 2026-09-17)",
+    origin_note="The strict prompt behind the site's dagger-marked runs is unreleased; these bullets state the footnote's two rules in the original prompt's style and are inserted after its base-model constraint.",
+    inspect_parameter="strict_prompt",
+)
+
 ORIGINAL_CLI_CONTEXT = Prompt(
     title="original_claude_context",
     prompt="\nYou are running in a non-interactive mode. So make sure every process you are running finishes before you write your last message.\n",
@@ -140,6 +152,7 @@ PROMPTS.update(
     {
         prompt.title: prompt
         for prompt in [
+            STRICT_RULES,
             ORIGINAL_CLI_CONTEXT,
             CONTINUE_PROMPT,
             NUDGE_PROMPT,

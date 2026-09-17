@@ -6,7 +6,7 @@ from typing import Any
 
 from inspect_ai.dataset import MemoryDataset, Sample
 
-from inferencebench.prompts import ASSETS, select_prompt
+from inferencebench.prompts import ASSETS, STRICT_RULES, select_prompt
 
 SCENARIOS = json.loads((ASSETS / "datasets" / "scenarios.json").read_text())
 
@@ -82,6 +82,12 @@ def get_inference_dataset(
     for scenario in selected:
         record = SCENARIOS[scenario]
         prompt = select_prompt(options["system_prompt"], "system_prompt").prompt
+        if options["strict_prompt"]:
+            anchor = "* Base Model: You must use {model}."
+            if anchor not in prompt:
+                raise ValueError("strict_prompt requires the original base-model constraint in the selected prompt")
+            line_end = prompt.index("\n", prompt.index(anchor)) + 1
+            prompt = prompt[:line_end] + STRICT_RULES.prompt + "\n" + prompt[line_end:]
         for key, value in {
             "model": options["base_model"],
             "scenario": record["benchmark"],

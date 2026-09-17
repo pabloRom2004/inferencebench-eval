@@ -699,6 +699,7 @@ def test_registered_yaml_solver(local_task, monkeypatch, tmp_path):
         {"quality_tau": math.nan},
         {"quality_tau": True},
         {"quality_reference_backend": "sglang"},
+        {"strict_prompt": "yes"},
     ],
 )
 def test_invalid_workload_arguments(options):
@@ -1768,3 +1769,22 @@ def test_quality_reference_backend_server_order(monkeypatch, tmp_path, backend):
         assert events == [transformers, "stop", vllm, "quality", "stop"]
     provenance = json.loads((tmp_path / "provenance.json").read_text())
     assert provenance["quality_reference"] == {"backend": backend, "vllm_version": "0.19.0" if backend == "vllm" else None}
+
+
+@pytest.mark.parametrize("config_defaults", ["default", "original"])
+@pytest.mark.parametrize("strict", [True, False])
+def test_strict_prompt_toggle(config_defaults, strict):
+    """Insert the leaderboard's strict rules after the base-model constraint in both prompts, or leave the text untouched."""
+    args = load_config(f"run_configs/{config_defaults}.yaml")["task"]["args"]
+    assert args["strict_prompt"] is True
+    text = inference_bench(**{**args, "scenarios": "A", "seed_pairs": [[21, 1337]], "strict_prompt": strict}).dataset[0].input
+    anchor = "* Base Model: You must use mistralai/Mistral-7B-Instruct-v0.3."
+    rules = "* Checkpoints: Do not download or serve third-party pre-quantized, distilled, or fine-tuned checkpoints of mistralai/Mistral-7B-Instruct-v0.3"
+    harness = "* Evaluation harness: Do not modify, replace, wrap, or bypass evaluate.py"
+    assert anchor in text and "{model}" not in text
+    assert (rules in text) is strict and (harness in text) is strict
+    if strict:
+        assert text.index(anchor) < text.index(rules) < text.index(harness) < text.index("## 5. Output Contract")
+        assert text.replace(PROMPTS["strict_rules"].prompt.replace("{model}", "mistralai/Mistral-7B-Instruct-v0.3") + "\n", "") == inference_bench(
+            **{**args, "scenarios": "A", "seed_pairs": [[21, 1337]], "strict_prompt": False}
+        ).dataset[0].input

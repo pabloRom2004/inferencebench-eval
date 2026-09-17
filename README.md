@@ -119,6 +119,7 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `gpu_provider`: `modal` or `runpod`; `modal`.
 - `base_model`: `mistralai/Mistral-7B-Instruct-v0.3`.
 - `context_length`: optimizing model's context window; `null` uses Inspect's metadata. Set `1048576` for DeepSeek V4.1 Flash.
+- `strict_prompt`: insert the leaderboard's strict rules (no third-party pre-quantized checkpoints, no modifying the evaluation harness) after the base-model constraint; `true`. The paper's Table 2 used the plain prompt; the site's dagger-marked rows used a strict prompt whose text is unreleased, so the wording is the port's.
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
 - `request_cache`: bundled prompts; original uses its full-workload cache. `null` enables corpus sampling.
 - `quality_samples`, `quality_seed`: `500`, `248`.
@@ -165,6 +166,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 - Remove the bundled MMLU-Pro reference cache and its preparation CLI; every attempt measures the quality reference on its own GPU.
 - Add `quality_reference_backend`: the default measures the reference with a pinned vLLM 0.19.0 server; `original.yaml` keeps the Transformers server.
 - Give both configs the released judge's inline evidence and shell access (`preload_evidence`, `judge_shell`) and export the transcript in both; `transcript_hint` mentions it only in the default prompt.
+- Add `strict_prompt` (default `true` in both configs), inserting the leaderboard's strict rules after the base-model constraint.
 
 ### [13] - 2026-09-12
 

@@ -14,6 +14,8 @@ task:
     context_length: null
     agent_seconds: null
     system_prompt: token_budget
+    # Leaderboard strict rules: no third-party pre-quantized checkpoints, no harness edits.
+    strict_prompt: true
     request_limit: 10
     request_cache: assets/datasets/longbench/requests.json.gz
     quality_samples: 500

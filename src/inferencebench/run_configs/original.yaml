@@ -14,6 +14,8 @@ task:
     context_length: null
     agent_seconds: 7200
     system_prompt: original
+    # The paper's Table 2 used false; the site's dagger-marked rows used the strict prompt.
+    strict_prompt: true
     request_limit: null
     request_cache: assets/datasets/longbench/original-requests.json.gz
     quality_samples: 500
