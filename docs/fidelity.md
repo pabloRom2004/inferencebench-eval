@@ -53,8 +53,9 @@ scenario definitions are read from that copy rather than re-typed.
    generation and answer parsing.
 7. **Ask the integrity judge to inspect evidence.** Upstream's
    `get_judge_prompt.py` renders the unchanged rubric and inlines the restarted
-   launcher and server-log tail. A separate role-bound model reads the launcher,
-   source, and logs through a read-only tool. Default runs additionally expose all recorded model
+   launcher and server-log tail; Claude Code, with the role-bound judge model
+   behind Inspect's bridge, runs it in the submission directory and writes the
+   two verdict files, as upstream's `claude --print` call does. Default runs additionally expose all recorded model
    outputs and tool results, including history removed by context compaction.
    Native CLI tool results are recovered from model inputs and saved once even
    when later API calls repeat the same history.
@@ -80,8 +81,8 @@ of the paper's reported model/scaffold experiment.
 | --- | --- |
 | Subject and budget | The requested GLM-5.3 Flash comparison uses ReAct and Claude Code with a billion-token budget. The original uses two hours and its own model/scaffold pairings. |
 | Config structure | The main modules follow ExploitBench. InferenceBench retains its supported native `solver` YAML block and `--solver` overrides; task setup and final scoring stay independent of that choice. |
-| Judge | Original: Sonnet 4.6 inside Claude Code, before final evaluation, writing verdict files. Maintained default: GPT-6 Astra inside Inspect ReAct, after performance/quality pass, returning verdicts. `original.yaml` selects Sonnet inside Inspect ReAct with the same rubric, the same inline evidence, and a shell tool; the judge still returns verdict lines and runs after measurement. |
-| Judge evidence | Upstream inlines `start_server.sh` and the last 200 lines of `server.log` into the prompt and gives the judge a shell in the agent's home; nothing points it at the agent transcript, and the released runs' vLLM model line sits inside that 200-line tail in only 61 of 217 logs. Both configs build the prompt with upstream's `get_judge_prompt.py` from the restarted submission's launcher and `final-server.log` (`preload_evidence`), add shell access (`judge_shell`), append only a minimal adapter that names the directory and the verdict format, and export the Inspect transcript to `/tmp/inferencebench/agent-transcript.json`, present but unmentioned as the CLI session logs were in the released container. `default.yaml` adds one line pointing the judge at that transcript (`transcript_hint`). |
+| Judge | Original: Sonnet 4.6 inside Claude Code, before final evaluation, writing verdict files. Both configs now run Claude Code (pinned by `judge_cli_version`) in the restarted submission directory with the prompt from upstream's `get_judge_prompt.py` and read the same verdict files; the model behind it is Sonnet 4.6 in `original.yaml` and GPT-6 Astra in `default.yaml`, and the judge runs after measurement rather than before. |
+| Judge evidence | Upstream inlines `start_server.sh` and the last 200 lines of `server.log` into the prompt and gives the judge a shell in the agent's home; nothing points it at the agent transcript, and the released runs' vLLM model line sits inside that 200-line tail in only 61 of 217 logs. Both configs build the prompt with upstream's `get_judge_prompt.py` from the restarted submission's launcher and `final-server.log`, hand it to Claude Code unchanged, and export the Inspect transcript to `/tmp/inferencebench/agent-transcript.json`, present but unmentioned as the CLI session logs were in the released container. Verdict files an agent pre-writes are deleted before the judge runs; upstream would read them. `default.yaml` adds one line pointing the judge at that transcript (`transcript_hint`). |
 | Isolation | Hawk/RunPod replaces the original scheduler/Apptainer arrangement. The full filesystem survives restart, rather than selected persistent directories. Live shell exports must be written into the standalone launcher. |
 | Hardware/software | H100 80GB, minimum 16 vCPUs/180GB RAM, Ubuntu 22.04 and CUDA 12.8 follow upstream. Storage, GPU host scheduling, driver, and unpinned dependencies can differ; record them with the run. |
 | Speed baseline | Upstream precomputes the PyTorch baseline once per scenario and seed pair and reuses it for every agent. The port does the same, keyed additionally by GPU model, precision, and evaluator revision, with the measuring sample recorded in the stored manifest. |

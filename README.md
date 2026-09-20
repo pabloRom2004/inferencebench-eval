@@ -147,7 +147,7 @@ Evaluation (`eval_config`):
 - `time_limit`: native attempt deadline; `null`. The original uses `agent_seconds` above.
 - `max_samples`: concurrent attempts; `1`.
 
-The separate integrity judge uses GPT-6 Astra by default and Claude Sonnet 4.6 in the original config; change `model_roles.integrity` to replace it. Both configs inline the launcher and server-log tail into the judge prompt, give the judge shell access, and export the agent transcript into the scoring sandbox, matching the released container where the CLI session logs sat unreferenced; only the default config's prompt points the judge at that transcript.
+The separate integrity judge runs the way upstream's does: upstream's `get_judge_prompt.py` renders the rubric with the restarted launcher and server-log tail, Claude Code (`judge_cli_version`, run through Inspect SWE with the model routed by Inspect) executes in the submission directory with permissions bypassed, and the two verdict files it writes decide the outcome. The judge model is GPT-6 Astra by default and Claude Sonnet 4.6 in the original config; change `model_roles.integrity` to replace it. Both configs export the agent transcript into the scoring sandbox, matching the released container where the CLI session logs sat unreferenced; only the default config's prompt points the judge at it. The original config judges once (`max_grader_attempts: 1`); the maintained configs re-run the judge when its verdict files are missing or malformed.
 
 ## Dataset
 
@@ -173,6 +173,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 - Render the prompt exactly as upstream's `get_prompt.py` (integer hours, `metrics_preview.json`, no trailing newline), verified by a test that runs the script.
 - `quality_baseline_max_attempts: 1` now accepts upstream's registry as measured; `2` keeps the isolated retry and completeness requirement.
 - Add `claude_code.yaml` and `codex_cli.yaml` with the verified Inspect SWE settings, `cli_poll_timeout`, OpenCode native compaction and provider timers, staged Codex release archives, and a ReAct `tool_timeout`.
+- Judge with upstream's own invocation: Claude Code (`judge_cli_version`) in the restarted submission directory with the prompt rendered by `get_judge_prompt.py`, reading the two verdict files it writes. The hand-built inspection and shell tools, adapter prompts, and the `preload_evidence` and `judge_shell` toggles are removed; `original.yaml` judges once like upstream.
 
 ### [14] - 2026-09-17
 
