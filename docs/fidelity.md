@@ -2,9 +2,12 @@
 
 Reviewed against the [paper](https://arxiv.org/abs/2607.20468) and released
 [implementation at `24cdf88`](https://github.com/aisa-group/InferenceBench/tree/24cdf88f6a4e14ed85d665aa132cecccb3ee95ef).
-The original subject prompt, judge rubric, and all four scenario definitions
-match the packaged copies exactly. The GPU setup downloads that pinned source;
-the port calls its evaluator instead of implementing another one.
+The repository is vendored byte-for-byte under `src/inferencebench/upstream/`;
+a test recomputes its git tree hash against `upstream.lock`. Each sample installs
+that copy in its sandbox, applies the one patch in `patches/` (the sampler's
+boundary-token repair), and runs upstream's own commands for every measured
+stage. The subject prompt, judge rubric, launcher template, evaluator stub, and
+scenario definitions are read from that copy rather than re-typed.
 
 ## Data flow
 
@@ -16,15 +19,20 @@ the port calls its evaluator instead of implementing another one.
    installs the pinned evaluator, downloads Mistral-7B-Instruct-v0.3, and
    records the resolved checkpoint and input hashes. Mistral is the server
    being optimized; GLM is the agent doing the optimization.
-3. **Measure the reference.** The upstream Transformers server processes the
-   evaluation request set on this run's GPU, with upstream's sequential baseline
-   override. A reference server then answers the 500-question MMLU-Pro
-   reference: Transformers in `original.yaml`, pinned vLLM in `default.yaml`.
-   This happens before the optimization budget starts.
-4. **Ask the subject to build a server.** Render the original model, scenario,
-   mission, and endpoint placeholders. The token-budget prompt changes the
-   original time instructions. The agent gets root, Internet, engine installation,
-   development requests, `evaluate.py`, and an initially empty `start_server.sh`.
+3. **Measure the reference.** Upstream's `cache_samples` command caches the
+   question pools, then `precompute_baseline` measures the Transformers server
+   on this run's GPU with upstream's torch settings (sequential requests, a
+   900-second request timeout). `precompute_quality_baseline` then answers the
+   500-question MMLU-Pro reference at concurrency 1 on Transformers
+   (`original.yaml`) or at `quality_concurrency` on pinned vLLM
+   (`default.yaml`), writing the registry file upstream's gate reads. This
+   happens before the optimization budget starts.
+4. **Ask the subject to build a server.** Render the original placeholders
+   exactly as `get_prompt.py` does (a test compares the two). The token-budget
+   prompt changes the original time instructions. The agent gets root, Internet,
+   engine installation, upstream's `evaluate.py` stub over the
+   `/opt/inference_eval` bundle, upstream's timer, the original container
+   environment, and the unchanged empty `start_server.sh`.
    It must serve the supplied checkpoint locally through the required OpenAI
    endpoints, improve the scenario metric, and retain quality.
 5. **Run the selected harness.** `harness_default.py` runs native Inspect ReAct;
@@ -37,14 +45,16 @@ the port calls its evaluator instead of implementing another one.
    latter let an agent's `pkill -f start_server` kill its own CLI.
    `harness_original.py` separately retains the original time-based CLI loop.
 6. **Restart and measure the submission.** Preserve installed files, discard live
-   processes, restore trusted evaluator inputs from the controller, and invoke
-   the saved standalone launcher. The upstream evaluator measures speed on the
-   evaluation requests and asks the submitted Mistral server all 500 quality
-   questions with the original greedy generation and answer parsing.
-7. **Ask the integrity judge to inspect evidence.** The unchanged rubric checks
-   contamination, model substitution, API offloading, and other prohibited
-   behavior. A separate role-bound model reads the launcher, source, and logs
-   through a read-only tool. Default runs additionally expose all recorded model
+   processes, reinstall the pristine upstream copy and the measured inputs from
+   the controller, and invoke the saved standalone launcher under upstream's
+   supervisor. Upstream's task `evaluate.py` then runs with its own retry
+   schedule, measuring speed on the precomputed requests and asking the
+   submitted Mistral server all 500 quality questions with the original greedy
+   generation and answer parsing.
+7. **Ask the integrity judge to inspect evidence.** Upstream's
+   `get_judge_prompt.py` renders the unchanged rubric and inlines the restarted
+   launcher and server-log tail. A separate role-bound model reads the launcher,
+   source, and logs through a read-only tool. Default runs additionally expose all recorded model
    outputs and tool results, including history removed by context compaction.
    Native CLI tool results are recovered from model inputs and saved once even
    when later API calls repeat the same history.
@@ -71,13 +81,14 @@ of the paper's reported model/scaffold experiment.
 | Subject and budget | The requested GLM-5.3 Flash comparison uses ReAct and Claude Code with a billion-token budget. The original uses two hours and its own model/scaffold pairings. |
 | Config structure | The main modules follow ExploitBench. InferenceBench retains its supported native `solver` YAML block and `--solver` overrides; task setup and final scoring stay independent of that choice. |
 | Judge | Original: Sonnet 4.6 inside Claude Code, before final evaluation, writing verdict files. Maintained default: GPT-6 Astra inside Inspect ReAct, after performance/quality pass, returning verdicts. `original.yaml` selects Sonnet inside Inspect ReAct with the same rubric, the same inline evidence, and a shell tool; the judge still returns verdict lines and runs after measurement. |
-| Judge evidence | Upstream inlines `start_server.sh` and the last 200 lines of `server.log` into the prompt and gives the judge a shell in the agent's home; nothing points it at the agent transcript, and the released runs' vLLM model line sits inside that 200-line tail in only 61 of 217 logs. Both configs reproduce the inline block verbatim from the restarted submission's launcher and `final-server.log` (`preload_evidence`), add shell access (`judge_shell`), append only a minimal adapter that names the directory and the verdict format, and export the Inspect transcript to `/tmp/inferencebench/agent-transcript.json`, present but unmentioned as the CLI session logs were in the released container; a byte comparison on 2026-09-17 found the released prompt to be an exact prefix of the original-config prompt. `default.yaml` adds one line pointing the judge at that transcript (`transcript_hint`). |
+| Judge evidence | Upstream inlines `start_server.sh` and the last 200 lines of `server.log` into the prompt and gives the judge a shell in the agent's home; nothing points it at the agent transcript, and the released runs' vLLM model line sits inside that 200-line tail in only 61 of 217 logs. Both configs build the prompt with upstream's `get_judge_prompt.py` from the restarted submission's launcher and `final-server.log` (`preload_evidence`), add shell access (`judge_shell`), append only a minimal adapter that names the directory and the verdict format, and export the Inspect transcript to `/tmp/inferencebench/agent-transcript.json`, present but unmentioned as the CLI session logs were in the released container. `default.yaml` adds one line pointing the judge at that transcript (`transcript_hint`). |
 | Isolation | Hawk/RunPod replaces the original scheduler/Apptainer arrangement. The full filesystem survives restart, rather than selected persistent directories. Live shell exports must be written into the standalone launcher. |
 | Hardware/software | H100 80GB, minimum 16 vCPUs/180GB RAM, Ubuntu 22.04 and CUDA 12.8 follow upstream. Storage, GPU host scheduling, driver, and unpinned dependencies can differ; record them with the run. |
 | Speed baseline | Upstream precomputes the PyTorch baseline once per scenario and seed pair and reuses it for every agent. The port does the same, keyed additionally by GPU model, precision, and evaluator revision, with the measuring sample recorded in the stored manifest. |
 | Strict prompt | The site's dagger-marked runs used an unreleased stricter prompt that names third-party pre-quantized checkpoints and harness edits as disallowed. Both configs insert two bullets stating those rules after the base-model constraint (`strict_prompt: true`); the wording is the port's. Set it false to reproduce the paper's Table 2 prompt. |
-| Inputs | Each attempt downloads LongBench-v2 and runs upstream's seeded sampler and tokenizer-based truncation inside the sandbox, unmodified, so its one-token truncation abort remains possible on full counts. The MMLU-Pro reference is measured per attempt. |
-| Retries | Upstream retries whole final evaluations, sometimes with shorter request timeouts. This port evaluates once and reports failures. Default reference preparation retries failed questions without resampling or selecting a better answer; original permits one attempt. |
+| Inputs | Each attempt caches LongBench-v2 and MMLU-Pro with upstream's `cache_samples` and samples with upstream's tokenizer-based sampler, patched only to re-truncate when decoding drops a boundary token (upstream aborts there on some full-count seeds). Upstream's `precache_seeds.sh` writes every seed's MMLU-Pro selection to the quality-seed path, so which selection its runs used depends on shell iteration order; the port caches the quality seed explicitly. The MMLU-Pro reference is measured per attempt. |
+| Reference load | Upstream's precompute measures the Transformers speed baseline with a 900-second request timeout and its Transformers quality reference at concurrency 1; earlier port versions used 300 seconds and concurrency 4, which produced timeouts. Both now follow upstream. |
+| Retries | Upstream retries whole final evaluations three times, then twice with a 150-second request timeout; the port runs that schedule, minus upstream's step of killing every GPU process between attempts (which would also kill its relaunched server). Both configs retry a failed reference question once by re-running upstream's precompute for that question; `quality_baseline_max_attempts: 1` accepts upstream's registry as measured. |
 
 The paper and released code also disagree in several places. The paper describes
 a bfloat16 baseline; the code defaults to float16, which the port uses. Scenario

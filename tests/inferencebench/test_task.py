@@ -17,7 +17,6 @@ from inspect_ai.solver import generate, solver
 from inspect_ai.util import ExecResult, store
 
 from inferencebench import inference_bench, original_agent, react_agent
-from inferencebench.dataset import SCENARIOS
 from inferencebench.metrics import aggregate_speedup, complete_mean, performance
 from inferencebench.prompts import PROMPTS
 from inferencebench.run_config import load_config
@@ -71,10 +70,12 @@ def local_task(monkeypatch, tmp_path):
                 "deadline", time.time() + seconds if seconds is not None else None
             )
             store().set("artifacts", str(tmp_path))
-            from inferencebench.environment import workspace_env
-
-            store().set("workspace_env", workspace_env(state.metadata))
-            (tmp_path / "baseline.json").write_text(json.dumps(measurements()))
+            store().set("workspace_env", {
+                "INFERENCE_BENCH_BASE_MODEL": state.metadata["base_model"],
+                "INFERENCE_BENCH_MAX_MODEL_LEN": str(state.metadata["max_model_len"]),
+            })
+            (tmp_path / "trusted" / "speed").mkdir(parents=True, exist_ok=True)
+            (tmp_path / "trusted" / "speed" / "baseline_metrics.json").write_text(json.dumps({"baseline": measurements()}))
             state.metadata["prepared"] = True
             return state
 
@@ -195,61 +196,6 @@ def test_solver_override_and_judge_role(local_task, tmp_path):
     assert log.samples[0].scores["inference_speedup"].value == {"speedup": 2.0}
     assert log.results.scores[0].metrics["aggregate_speedup"].value == 2.0
     env.terminate.assert_awaited_once()
-
-
-def test_runtime_request_selection(monkeypatch, tmp_path):
-    """Run the original corpus sampler with the configured limit, tokenizer, and context."""
-    from inferencebench.assets.scripts import runtime
-
-    options = inference_bench().dataset[0].metadata
-    rows = [{"messages": [{"role": "user", "content": "prepared request"}]}]
-    runner = SimpleNamespace(
-        _get_tokenizer=Mock(return_value="tokenizer"),
-        _compute_max_input_tokens=lambda max_model_len, output_len: None,
-        _range_ratio=float,
-        _count_chat_tokens=lambda messages, tokenizer: 0,
-        _truncate_messages=lambda messages, tokenizer, maximum, keep="tail": messages,
-        _load_requests_jsonl=Mock(return_value=(rows, [])),
-        _prepare_requests=Mock(return_value=(rows, [])),
-    )
-    monkeypatch.setitem(sys.modules, "inference", SimpleNamespace(runner=runner))
-    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
-    config = SCENARIOS["A"]["config"]
-    assert runtime.prepare_requests(options, config, "dev") == (rows, [])
-    runner._prepare_requests.assert_called_once_with(config, 10, "tokenizer", 32768)
-    runner._load_requests_jsonl.assert_not_called()
-
-
-def test_development_wrapper_request_selection(monkeypatch, tmp_path):
-    """Run the generated development command and verify it reads the prepared development requests."""
-    import argparse
-    import os
-    import runpy
-    from unittest.mock import patch
-
-    from inferencebench.assets.scripts import runtime
-
-    context = tmp_path / "src/eval/tasks/_shared/task_context"
-    context.mkdir(parents=True)
-    for name in ["start_server.sh", "test_server.sh"]:
-        (context / name).touch()
-    monkeypatch.setattr(runtime, "ROOT", tmp_path)
-    monkeypatch.setattr(runtime, "TASK", tmp_path)
-    monkeypatch.setattr(runtime, "PROFILE", tmp_path / "profile.d" / "inferencebench.sh")
-    monkeypatch.setattr(sys, "argv", ["evaluate.py"])
-    observed = []
-
-    def run_evaluation(task, args):
-        """Observe the same environment-based file selection used by the upstream runner."""
-        observed.append(os.environ.get("INFERENCE_BENCH_REQUESTS_FILE"))
-
-    runner = SimpleNamespace(build_parser=argparse.ArgumentParser, run_evaluation=run_evaluation)
-    monkeypatch.setitem(sys.modules, "inference.runner", runner)
-    options = inference_bench().dataset[0].metadata
-    with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}, clear=True):
-        runtime.install_workspace(options)
-        runpy.run_path(str(tmp_path / "evaluate.py"))
-    assert observed == [str(tmp_path / "requests.jsonl")]
 
 
 def test_react_completes_without_early_exit_loop(local_task, tmp_path):
@@ -668,191 +614,6 @@ def test_runtime_uses_configured_workload():
     assert env["INFERENCE_BENCH_QUALITY_CONCURRENCY"] == "2"
     assert env["INFERENCE_BENCH_QUALITY_MMLUPRO_N"] == "16"
     assert env["INFERENCE_BENCH_QUALITY_SEED"] == "0"
-
-
-@pytest.mark.parametrize(
-    "successes,accuracy,valid",
-    [
-        ([True, True], 0.5, True),
-        ([False, False], 0.0, False),
-        ([True, False], 0.5, False),
-        ([True], 1.0, False),
-        ([True, True], 0.0, False),
-        ([True, True], math.nan, False),
-        ([True, True], math.inf, False),
-    ],
-)
-def test_quality_baseline_failure_accounting(
-    monkeypatch, tmp_path, successes, accuracy, valid
-):
-    """Reject failed or undefined references before model generation without assigning a submission score."""
-    from inferencebench.assets.scripts import runtime
-
-    environment = importlib.import_module("inferencebench.environment")
-    spec = SimpleNamespace(seed=248, limit=2)
-    log_path = tmp_path / "baseline_generations.jsonl"
-    log_path.write_text("".join(json.dumps({"success": ok}) + "\n" for ok in successes))
-    upstream = SimpleNamespace(
-        _run_dataset=Mock(return_value=(accuracy, log_path, None))
-    )
-    monkeypatch.setitem(
-        sys.modules, "inference", SimpleNamespace(precompute_quality_baseline=upstream)
-    )
-    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
-    task = inference_bench(scenarios="A", seed_pairs=[[21, 1337]])
-    options = task.dataset[0].metadata
-    options["quality_baseline_max_attempts"] = 1
-    if valid:
-        runtime.prepare_quality_baseline(options, spec)
-        registry = json.loads((tmp_path / "quality.json").read_text())
-        assert registry["datasets"]["mmlu_pro"][0]["accuracy"] == accuracy
-        return
-
-    async def execute(command, **kwargs):
-        """Run reference validation at the real setup command boundary with simulated GPU results."""
-        if "prepare" in command:
-            try:
-                runtime.prepare_quality_baseline(options, spec)
-            except RuntimeError as error:
-                return ExecResult(success=False, returncode=1, stdout="", stderr=str(error))
-        return ExecResult(success=True, returncode=0, stdout="", stderr="")
-
-    env = SimpleNamespace(resource_id="test", exec=execute, write_file=AsyncMock())
-    monkeypatch.setattr(environment, "gpu_environment", lambda: env)
-    task.sandbox = None
-    [log] = inspect_eval(
-        task, model="mockllm/subject", display="none", log_dir="logs"
-    )
-    assert log.status == "error"
-    assert "Transformers quality baseline" in log.samples[0].error.message
-    assert not log.samples[0].scores
-    assert not log.stats.model_usage
-    assert not (tmp_path / "quality.json").exists()
-
-
-@pytest.mark.parametrize("retry_success", [False, True])
-def test_quality_reference_retry(monkeypatch, tmp_path, retry_success):
-    """Keep successful answers, retry only failed IDs with unchanged inputs, and stop at the attempt bound."""
-    from dataclasses import dataclass
-
-    from inferencebench.assets.scripts import runtime
-
-    @dataclass
-    class Spec:
-        """Use the upstream dataset specification's replaceable fields."""
-        samples_file: Path
-        seed: int
-        limit: int
-
-    samples = [{"sample_id": str(i), "messages": [{"role": "user", "content": str(i)}],
-                "gold_answer": "A", "max_new_tokens": 2048, "temperature": 0} for i in range(2)]
-    source = tmp_path / "quality-samples.jsonl"
-    source.write_text("".join(json.dumps(row) + "\n" for row in samples))
-    spec = Spec(source, 248, 2)
-    calls = []
-
-    def run_dataset(selection, url, model, timeout, concurrency, out):
-        """Return a completed wrong answer and one transport failure, then replay the failed input."""
-        calls.append(selection)
-        assert timeout == 300
-        if len(calls) == 1:
-            assert concurrency == 4 and selection.limit == 2
-            rows = [{"sample_id": "0", "request_index": 0, "success": True, "gold_answer": "A", "parsed_answer": "B"},
-                    {"sample_id": "1", "request_index": 1, "success": False, "gold_answer": "A", "parsed_answer": None}]
-        else:
-            assert concurrency == 1 and selection.limit == 1
-            assert json.loads(selection.samples_file.read_text()) == samples[1]
-            rows = [{"sample_id": "1", "request_index": 0, "success": retry_success, "gold_answer": "A", "parsed_answer": "A" if retry_success else None}]
-        path = out / "baseline_generations.jsonl"
-        path.write_text("".join(json.dumps(row) + "\n" for row in rows))
-        return 0.0, path, None
-
-    def accuracy(rows):
-        """Mirror the upstream all-question denominator for this deterministic fixture."""
-        return sum(row["parsed_answer"] == row["gold_answer"] for row in rows) / len(rows)
-
-    monkeypatch.setitem(sys.modules, "inference", SimpleNamespace(precompute_quality_baseline=SimpleNamespace(_run_dataset=run_dataset, _accuracy=accuracy)))
-    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
-    options = inference_bench().dataset[0].metadata
-    if retry_success:
-        runtime.prepare_quality_baseline(options, spec)
-        registry = json.loads((tmp_path / "quality.json").read_text())
-        assert registry["datasets"]["mmlu_pro"][0]["accuracy"] == 0.5
-        resolved = [json.loads(line) for line in (tmp_path / "quality-baseline/resolved_generations.jsonl").read_text().splitlines()]
-        assert [row["request_index"] for row in resolved] == [0, 1]
-        assert resolved[0]["parsed_answer"] == "B"
-    else:
-        with pytest.raises(RuntimeError, match="did not complete every request"):
-            runtime.prepare_quality_baseline(options, spec)
-        assert not (tmp_path / "quality.json").exists()
-    assert len(calls) == 2
-    initial = [json.loads(line) for line in (tmp_path / "quality-baseline/baseline_generations.jsonl").read_text().splitlines()]
-    assert initial[1]["success"] is False
-    assert (tmp_path / "quality-baseline/attempt-2/1/baseline_generations.jsonl").exists()
-
-
-@pytest.mark.parametrize(
-    "dead,error,expected",
-    [
-        (
-            True,
-            TimeoutError("Timed out waiting for server at http://127.0.0.1:8000"),
-            "success",
-        ),
-        (
-            False,
-            TimeoutError("Timed out waiting for server at http://127.0.0.1:8000"),
-            "error",
-        ),
-        (True, ValueError("broken dataset"), "error"),
-        (True, TimeoutError("unrelated evaluator timeout"), "error"),
-    ],
-)
-def test_launcher_exit_during_evaluation(
-    local_task, monkeypatch, tmp_path, dead, error, expected
-):
-    """Grade confirmed launcher death as invalid while preserving unrelated evaluator failures as errors."""
-    from inferencebench.assets.scripts import runtime
-
-    task, env = local_task
-    process = Mock(returncode=1 if dead else None)
-    process.poll.return_value = 1 if dead else None
-    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
-    monkeypatch.setattr(runtime.shutil, "copy", Mock())
-    monkeypatch.setattr(runtime.subprocess, "Popen", Mock(return_value=process))
-    monkeypatch.setattr(runtime.os, "killpg", Mock())
-    monkeypatch.setattr(runtime, "wait_ready", Mock(return_value=True))
-    monkeypatch.setattr(runtime, "evaluate", Mock(side_effect=error))
-
-    async def execute(*args, **kwargs):
-        """Drive the actual runtime failure path through Inspect's normal scorer."""
-        runtime.final(task.dataset[0].metadata)
-        return ExecResult(success=True, returncode=0, stdout="", stderr="")
-
-    async def read_file(path):
-        """Return the runtime's recorded failure evidence to the real scorer."""
-        return (tmp_path / path.rsplit("/", 1)[-1]).read_text()
-
-    env.exec.side_effect = execute
-    env.read_file = read_file
-    [log] = inspect_eval(
-        task,
-        solver=generate(),
-        model="mockllm/subject",
-        display="none",
-        log_dir="logs",
-    )
-    assert log.status == expected
-    if expected == "success":
-        score = log.samples[0].scores["inference_speedup"]
-        assert score.value == {"speedup": 1.0}
-        assert score.metadata["final"]["launcher_returncode"] == 1
-        assert (
-            "Timed out waiting for server" in score.metadata["final"]["evaluator_error"]
-        )
-    else:
-        assert log.samples[0].error
-        assert not log.samples[0].scores
 
 
 def test_prompt_selection_contract():
@@ -1361,7 +1122,7 @@ def test_judge_transcript_toggle(
         """Persist the real scorer's exported evidence for inspection by the mock judge."""
         path = local_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
+        path.write_bytes(content if isinstance(content, bytes) else content.encode())
 
     async def upload(local, remote):
         """Transfer the streamed evidence while ignoring the fixture's synthetic evaluator archive."""
@@ -1391,8 +1152,6 @@ def test_judge_transcript_toggle(
             stderr.decode(),
         )
 
-    for name in ["quality.json", "heldout-requests.jsonl", "quality-samples.jsonl"]:
-        (tmp_path / name).write_text("{}")
     transcript = f"{environment.REMOTE}/agent-transcript.json"
     local_path(transcript).parent.mkdir(parents=True)
     local_path(transcript).write_text("stale transcript from a previous snapshot")
@@ -1506,7 +1265,7 @@ def test_judge_transcript_toggle(
         import io
         import tarfile
         fs, path = environment.url_to_fs(f"{destination}/artifacts/{sample.uuid}")
-        assert fs.exists(f"{path}/baseline.json")
+        assert fs.exists(f"{path}/trusted/speed/baseline_metrics.json")
         assert fs.exists(f"{path}/final.json")
         with tarfile.open(fileobj=io.BytesIO(fs.cat(f"{path}/submission.tar.gz"))) as archive:
             assert archive.extractfile("task/start_server.sh").read() == b"launcher evidence"
@@ -1647,82 +1406,6 @@ def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path, fai
     fs.rm(path, recursive=True)
 
 
-@pytest.mark.parametrize("backend", ["transformers", "vllm"])
-def test_quality_reference_backend_server_order(monkeypatch, tmp_path, backend):
-    """Measure the vLLM reference only after the Transformers baseline has released the GPU, and record the backend."""
-    from dataclasses import dataclass
-
-    from inferencebench.assets.scripts import runtime
-
-    @dataclass
-    class Spec:
-        """Use the upstream dataset specification's replaceable fields."""
-        samples_file: Path
-        seed: int
-        limit: int
-
-    task_dir = tmp_path / "task"
-    task_dir.mkdir()
-    spec = Spec(tmp_path / "quality-samples.jsonl", 248, 2)
-    events = []
-
-    def write_requests(path, rows):
-        """Write the request files whose hashes preparation records."""
-        Path(path).write_text("".join(json.dumps(row) + "\n" for row in rows))
-
-    upstream = SimpleNamespace(
-        baseline_eval=SimpleNamespace(_run_baseline=Mock(return_value={"profiles": {"burst": {"success_count": 1}}})),
-        cache_samples=SimpleNamespace(
-            cache_longbench_v2=Mock(),
-            cache_mmlu_pro=Mock(side_effect=lambda path, seed, limit: path.write_text("{}\n")),
-        ),
-        precompute_baseline=SimpleNamespace(_write_requests_jsonl=write_requests),
-        quality_gate=SimpleNamespace(get_quality_specs=lambda: ([spec], None, None)),
-        runner=SimpleNamespace(
-            load_scenario_config=lambda task: {},
-            _get_tokenizer=lambda model: None,
-            _compute_max_input_tokens=lambda max_model_len, output_len: None,
-            _range_ratio=float,
-            _count_chat_tokens=lambda messages, tokenizer: 0,
-            _truncate_messages=lambda messages, tokenizer, maximum, keep="tail": messages,
-            _prepare_requests=lambda *args: ([{"messages": []}],),
-        ),
-    )
-    monkeypatch.setitem(sys.modules, "inference", upstream)
-    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=lambda *args, **kwargs: str(tmp_path / "snapshot")))
-    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
-    monkeypatch.setattr(runtime, "TASK", task_dir)
-    monkeypatch.setattr(runtime.shutil, "copy", Mock())
-    monkeypatch.setattr(runtime, "install_workspace", Mock())
-    monkeypatch.setattr(runtime, "wait_ready", Mock(return_value=True))
-    monkeypatch.setattr(runtime, "prepare_quality_baseline", Mock(side_effect=lambda options, spec: events.append("quality")))
-    monkeypatch.setattr(runtime.subprocess, "check_output", Mock(return_value="0.19.0\n"))
-
-    commands = []
-
-    def popen(command, **kwargs):
-        """Record each server launch as a live process."""
-        events.append(("start", command[0], command[1]))
-        commands.append(command)
-        return Mock(pid=len(events), poll=Mock(return_value=None), wait=Mock())
-
-    monkeypatch.setattr(runtime.subprocess, "Popen", popen)
-    monkeypatch.setattr(runtime.os, "killpg", Mock(side_effect=lambda pid, sig: events.append("stop")))
-
-    options = inference_bench(quality_reference_backend=backend, baseline_dtype="bfloat16").dataset[0].metadata
-    runtime.prepare(options)
-    assert all(command[command.index("--dtype") + 1] == "bfloat16" for command in commands)
-
-    transformers = ("start", "python3", str(runtime.ROOT / "src/eval/inference/servers/transformers_openai_server.py"))
-    vllm = ("start", "/opt/reference/bin/vllm", "serve")
-    if backend == "transformers":
-        assert events == [transformers, "quality", "stop"]
-    else:
-        assert events == [transformers, "stop", vllm, "quality", "stop"]
-    provenance = json.loads((tmp_path / "provenance.json").read_text())
-    assert provenance["quality_reference"] == {"backend": backend, "vllm_version": "0.19.0" if backend == "vllm" else None}
-
-
 @pytest.mark.parametrize("config_defaults", ["default", "original"])
 @pytest.mark.parametrize("strict", [True, False])
 def test_strict_prompt_toggle(config_defaults, strict):
@@ -1740,149 +1423,6 @@ def test_strict_prompt_toggle(config_defaults, strict):
         assert text.replace(PROMPTS["strict_rules"].prompt.replace("{model}", "mistralai/Mistral-7B-Instruct-v0.3") + "\n", "") == inference_bench(
             **{**args, "scenarios": "A", "seed_pairs": [[21, 1337]], "strict_prompt": False}
         ).dataset[0].input
-
-
-def test_workspace_names_the_configured_model(monkeypatch, tmp_path):
-    """Rewrite the launcher fallback and export the served model for login shells when the base model changes."""
-    from inferencebench.assets.scripts import runtime
-
-    root = tmp_path / "root"
-    context = root / "src/eval/tasks/_shared/task_context"
-    context.mkdir(parents=True)
-    (context / "start_server.sh").write_text(
-        'MODEL_ID="${INFERENCE_BENCH_BASE_MODEL:-mistralai/Mistral-7B-Instruct-v0.3}"\necho "$MODEL_ID"\n'
-    )
-    (context / "test_server.sh").write_text("#!/bin/bash\n")
-    task = tmp_path / "task"
-    task.mkdir()
-    monkeypatch.setattr(runtime, "ROOT", root)
-    monkeypatch.setattr(runtime, "TASK", task)
-    monkeypatch.setattr(runtime, "PROFILE", tmp_path / "profile.d" / "inferencebench.sh")
-    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
-    options = inference_bench(base_model="org/other model", max_model_len=8192).dataset[0].metadata
-    runtime.install_workspace(options)
-    assert (task / "start_server.sh").read_text().startswith('MODEL_ID="${INFERENCE_BENCH_BASE_MODEL:-org/other model}"')
-    assert (tmp_path / "profile.d" / "inferencebench.sh").read_text() == (
-        "export INFERENCE_BENCH_BASE_MODEL='org/other model'\nexport INFERENCE_BENCH_MAX_MODEL_LEN=8192\n"
-    )
-    assert "'INFERENCE_BENCH_BASE_MODEL': 'org/other model'" in (task / "evaluate.py").read_text()
-
-
-def test_speed_baseline_reuse(monkeypatch, tmp_path):
-    """Measure the speed baseline once per workload and GPU model, then upload the stored copy to later samples."""
-    environment = importlib.import_module("inferencebench.environment")
-    monkeypatch.setattr(environment, "BASELINE_CACHE", tmp_path / "baselines")
-    written, uploads, prepares = {}, [], []
-
-    async def execute(command, **kwargs):
-        """Answer the GPU inventory and record the options each preparation received."""
-        if command[0] == "nvidia-smi":
-            return ExecResult(success=True, returncode=0, stdout="name, memory.total [MiB], driver_version\nNVIDIA H100 80GB HBM3, 81559 MiB, 580.95.05\n", stderr="")
-        if "prepare" in command:
-            prepares.append(json.loads(written["options"]))
-        return ExecResult(success=True, returncode=0, stdout="", stderr="")
-
-    async def read_file(path):
-        """Serve the trusted preparation outputs and the final measurement."""
-        name = path.rsplit("/", 1)[-1]
-        if name == "final.json":
-            return json.dumps(measurements(2))
-        if name == "baseline.json":
-            return json.dumps(measurements())
-        if name == "provenance.json":
-            return json.dumps({"downloaded_model_revision": "rev", "input_sha256": {}})
-        if name == "heldout-requests.jsonl":
-            return '{"messages": []}\n'
-        return "{}"
-
-    async def write_file(path, content):
-        """Capture the options handed to the sandbox runtime."""
-        if path.endswith("options.json"):
-            written["options"] = content
-
-    async def upload(local, remote):
-        """Record which shared files reach the sandbox."""
-        uploads.append(Path(local).name)
-
-    async def download(remote, local):
-        """Materialise downloaded artifacts locally."""
-        Path(local).write_text("x")
-
-    env = SimpleNamespace(resource_id="pod", exec=execute, read_file=read_file, write_file=write_file, upload=upload, download=download, terminate=AsyncMock())
-    monkeypatch.setattr(environment, "gpu_environment", lambda: env)
-    monkeypatch.setattr(SCORERS, "restart_for_scoring", AsyncMock(return_value=env))
-
-    def run(**overrides):
-        """Run one sample through the real preparation solver and return its metadata."""
-        task = inference_bench(**{"scenarios": "A", "seed_pairs": [[21, 1337]], "agent_seconds": 2, **overrides})
-        task.sandbox = None
-        [log] = inspect_eval(task, solver=generate(), model="mockllm/subject", model_roles={"integrity": judge_model()}, display="none", log_dir="logs")
-        assert log.status == "success", log.error
-        return log.samples[0].metadata
-
-    first = run()
-    assert prepares[-1]["cached_speed_baseline"] is False and first["speed_baseline"]["source"] == "measured"
-    [stored] = list((tmp_path / "baselines").iterdir())
-    manifest = json.loads((stored / "manifest.json").read_text())
-    assert manifest["identity"]["gpu"] == "NVIDIA H100 80GB HBM3" and manifest["identity"]["scenario"] == "A" and manifest["identity"]["eval_seed"] == 1337
-    assert (stored / "baseline.json").exists() and (stored / "heldout-requests.jsonl").exists() and (stored / "baseline-generations.jsonl").exists()
-    assert uploads == []
-
-    second = run()
-    assert prepares[-1]["cached_speed_baseline"] is True and second["speed_baseline"]["source"] == "cache"
-    assert sorted(uploads) == ["baseline.json", "heldout-requests.jsonl"]
-    assert second["speed_baseline"]["folder"] == str(stored.resolve())
-
-    run(seed_pairs=[[21, 428]])
-    assert prepares[-1]["cached_speed_baseline"] is False and len(list((tmp_path / "baselines").iterdir())) == 2
-
-
-@pytest.mark.parametrize("backend", ["transformers", "vllm"])
-def test_prepare_skips_measurement_for_shared_baseline(monkeypatch, tmp_path, backend):
-    """Use the uploaded baseline instead of measuring, and start the Transformers server only when the reference needs it."""
-    from dataclasses import dataclass
-
-    from inferencebench.assets.scripts import runtime
-
-    @dataclass
-    class Spec:
-        """Use the upstream dataset specification's replaceable fields."""
-        samples_file: Path
-        seed: int
-        limit: int
-
-    (tmp_path / "task").mkdir()
-    (tmp_path / "baseline.json").write_text(json.dumps(measurements()))
-    (tmp_path / "heldout-requests.jsonl").write_text('{"messages": []}\n')
-    spec = Spec(tmp_path / "quality-samples.jsonl", 248, 2)
-    run_baseline = Mock()
-    sampled = []
-    upstream = SimpleNamespace(
-        baseline_eval=SimpleNamespace(_run_baseline=run_baseline),
-        cache_samples=SimpleNamespace(cache_longbench_v2=Mock(), cache_mmlu_pro=Mock(side_effect=lambda path, seed, limit: path.write_text("{}\n"))),
-        precompute_baseline=SimpleNamespace(_write_requests_jsonl=lambda path, rows: Path(path).write_text("".join(json.dumps(row) + "\n" for row in rows))),
-        quality_gate=SimpleNamespace(get_quality_specs=lambda: ([spec], None, None)),
-        runner=SimpleNamespace(load_scenario_config=lambda task: {}, _get_tokenizer=lambda model: None, _compute_max_input_tokens=lambda max_model_len, output_len: None, _range_ratio=float, _count_chat_tokens=lambda messages, tokenizer: 0, _truncate_messages=lambda messages, tokenizer, maximum, keep="tail": messages, _prepare_requests=lambda config, *args: sampled.append(config["dataset_seed"]) or ([{"messages": []}],)),
-    )
-    monkeypatch.setitem(sys.modules, "inference", upstream)
-    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=lambda *args, **kwargs: str(tmp_path / "snapshot")))
-    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
-    monkeypatch.setattr(runtime, "TASK", tmp_path / "task")
-    monkeypatch.setattr(runtime.shutil, "copy", Mock())
-    monkeypatch.setattr(runtime, "install_workspace", Mock())
-    monkeypatch.setattr(runtime, "wait_ready", Mock(return_value=True))
-    monkeypatch.setattr(runtime, "prepare_quality_baseline", Mock())
-    monkeypatch.setattr(runtime.subprocess, "check_output", Mock(return_value="0.19.0\n"))
-    launches = []
-    monkeypatch.setattr(runtime.subprocess, "Popen", lambda command, **kwargs: launches.append(command[1] if command[0].endswith("vllm") else "transformers") or Mock(pid=1, poll=Mock(return_value=None), wait=Mock()))
-    monkeypatch.setattr(runtime.os, "killpg", Mock())
-
-    options = {**inference_bench(quality_reference_backend=backend).dataset[0].metadata, "cached_speed_baseline": True}
-    runtime.prepare(options)
-    run_baseline.assert_not_called()
-    assert sampled == [options["dev_seed"]]
-    assert launches == (["transformers"] if backend == "transformers" else ["serve"])
-    assert json.loads((tmp_path / "provenance.json").read_text())["speed_baseline"] == "cached"
 
 
 async def test_deadline_absorbs_failures_after_expiry(monkeypatch):
@@ -1913,86 +1453,484 @@ async def test_deadline_absorbs_failures_after_expiry(monkeypatch):
         await reminders.with_deadline(broken)(state, None)
 
 
-def test_prepare_requests_restores_dropped_boundary_token(monkeypatch):
-    """Repair upstream's one-token head-truncation shortfall instead of aborting sampling, and restore the sampler afterwards."""
+
+
+def upstream_options(**overrides):
+    """Sample options for runtime tests, taken from the packaged configuration."""
+    return {**inference_bench(scenarios="A", seed_pairs=[[21, 1337]], **overrides).dataset[0].metadata, "directory": "inference_scenario_a_input_heavy"}
+
+
+def test_vendored_upstream_matches_pinned_commit():
+    """Keep the vendored upstream copy byte-identical to the pinned commit; every change lives in patches/."""
+    from inferencebench import vendored
+
+    lock = vendored.upstream_lock()
+    assert vendored.git_tree_hash(vendored.UPSTREAM) == lock["tree"]
+    assert len(lock["commit"]) == 40 and lock["source"].startswith("https://github.com/")
+    assert [patch.name for patch in vendored.PATCHES] == ["0001-repair-head-truncation-boundary.patch"]
+    assert vendored.scenario_directories() == {
+        "A": "inference_scenario_a_input_heavy", "B": "inference_scenario_b_output_heavy",
+        "C": "inference_scenario_c_high_load", "D": "inference_scenario_d_general",
+    }
+
+
+def test_original_prompt_matches_upstream_renderer(tmp_path):
+    """Render the original prompt exactly as upstream's get_prompt.py does for a two-hour run."""
+    import os
+    import subprocess
+
+    from inferencebench.vendored import UPSTREAM
+
+    rendered = subprocess.run(
+        [sys.executable, "src/eval/general/get_prompt.py", "--agent", "opencode", "--base-model", "mistralai/Mistral-7B-Instruct-v0.3",
+         "--scenario-id", "inference_scenario_d_general", "--num-hours", "2", "--starting-point", "default"],
+        cwd=UPSTREAM, capture_output=True, text=True, check=True,
+        env={**os.environ, "INFERENCE_BENCH_METRICS_PATH": "/home/agent/task/metrics_preview.json"},
+    ).stdout.rstrip("\n")
+    args = load_config("run_configs/original.yaml")["task"]["args"]
+    prompt = inference_bench(**{**args, "scenarios": "D", "seed_pairs": [[21, 1337]], "strict_prompt": False}).dataset[0].input
+    assert prompt == rendered
+    assert "Time Budget: 2 hours." in prompt and "metrics_preview.json" in prompt
+
+
+def load_patched_runner(tmp_path, monkeypatch, patched):
+    """Import upstream's sampler from a scratch package, optionally with the port's patch applied."""
+    import subprocess
+
+    from inferencebench.vendored import PATCHES, UPSTREAM
+
+    # A distinct package name keeps these imports out of later tests' `inference` stubs.
+    package = tmp_path / ("patched" if patched else "pristine") / f"inference_{'patched' if patched else 'pristine'}"
+    package.mkdir(parents=True)
+    for name in ["__init__.py", "runner.py", "quality_gate.py"]:
+        (package / name).write_bytes((UPSTREAM / "src/eval/inference" / name).read_bytes())
+    if patched:
+        [patch] = PATCHES
+        # The patch addresses src/eval/inference/runner.py; apply it against the copied package path.
+        text = patch.read_text().replace("src/eval/inference/", f"{package.name}/")
+        (tmp_path / "patched" / "runner.patch").write_text(text)
+        subprocess.run(["git", "apply", "runner.patch"], cwd=tmp_path / "patched", check=True)
+    for module in ["aiohttp", "numpy", "requests"]:
+        monkeypatch.setitem(sys.modules, module, SimpleNamespace(ClientSession=object))
+    monkeypatch.syspath_prepend(str(package.parent))
+    return importlib.import_module(f"{package.name}.runner"), package
+
+
+@pytest.mark.parametrize("patched", [False, True])
+def test_upstream_patch_repairs_boundary_truncation(tmp_path, monkeypatch, patched):
+    """Upstream's sampler aborts when decoding drops a token at the head-truncation boundary; the patch re-truncates instead."""
+    runner, package = load_patched_runner(tmp_path, monkeypatch, patched)
+
+    class Tokenizer:
+        """Tokenize per character, with one character that decoding normalizes away."""
+
+        def apply_chat_template(self, messages, add_generation_prompt=True, tokenize=True):
+            """Count the characters of every message."""
+            return list("".join(message.get("content", "") for message in messages))
+
+        def encode(self, text, add_special_tokens=False):
+            """Return one token per character."""
+            return list(text)
+
+        def decode(self, tokens, skip_special_tokens=True, clean_up_tokenization_spaces=False):
+            """Drop the normalized character, as tokenizer detokenization can at a slice boundary."""
+            return "".join(tokens).replace("~", "")
+
+    pool = package / "baselines/samples/longbench_v2/7_503"
+    pool.mkdir(parents=True)
+    pool.joinpath("samples.jsonl").write_text(json.dumps({"sample_id": "doc", "messages": [{"role": "user", "content": "x" * 99 + "~" + "y" * 50}]}) + "\n")
+    config = {"synthetic": {"input_len": 100, "output_len": 10, "range_ratio": 1.0}, "num_requests": 1, "dataset_seed": 7}
+    if not patched:
+        with pytest.raises(RuntimeError, match="realized outside input range"):
+            runner._prepare_requests(config, 1, Tokenizer(), None)
+        return
+    [request], _ = runner._prepare_requests(config, 1, Tokenizer(), None)
+    assert request["input_token_count"] == 100 and "~" not in request["messages"][0]["content"]
+
+
+def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path):
+    """Install upstream's unchanged launch scaffold and evaluator stub, and export the agent environment for shells."""
+    from inferencebench.assets.scripts import runtime
+    from inferencebench.vendored import UPSTREAM
+
+    task = tmp_path / "task"
+    task.mkdir()
+    monkeypatch.setattr(runtime, "ROOT", UPSTREAM)
+    monkeypatch.setattr(runtime, "TASK", task)
+    monkeypatch.setattr(runtime, "PROFILE", tmp_path / "profile.d" / "inferencebench.sh")
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    options = upstream_options(base_model="org/other model", max_model_len=8192, agent_seconds=7200)
+    runtime.install_workspace(options)
+    assert (task / "start_server.sh").read_bytes() == (UPSTREAM / "src/eval/tasks/_shared/task_context/start_server.sh").read_bytes()
+    assert (task / "test_server.sh").stat().st_mode & 0o111
+    stub = (task / "evaluate.py").read_text()
+    assert stub.startswith("#!/usr/bin/env python3\n") and 'sys.path.insert(0, "/opt")' in stub and "from inference_eval.runner import build_parser, run_evaluation" in stub
+    assert stub in (UPSTREAM / "src/run_task.sh").read_text()
+    for name in ["scenario.json", "mission.txt", "benchmark.txt"]:
+        assert (task / name).read_bytes() == (UPSTREAM / "src/eval/tasks/inference_scenario_a_input_heavy" / name).read_bytes()
+    profile = (tmp_path / "profile.d" / "inferencebench.sh").read_text()
+    assert "export INFERENCE_BENCH_BASE_MODEL='org/other model'\n" in profile
+    assert "export INFERENCE_BENCH_MAX_MODEL_LEN=8192\n" in profile
+    assert "export INFERENCE_BENCH_SCENARIO=inference_scenario_a_input_heavy\n" in profile
+    assert "export INFERENCE_BENCH_DATASET_SEED=21\n" in profile and "export INFERENCE_BENCH_EVAL_SEED=1337\n" in profile
+    assert f"export INFERENCE_BENCH_METRICS_PATH={task}/metrics_preview.json\n" in profile
+    assert "export HOST=127.0.0.1\n" in profile and "export NUM_HOURS=2\n" in profile
+
+
+def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):
+    """Drive upstream's precompute command with its torch settings, or install the shared measurement instead."""
     from inferencebench.assets.scripts import runtime
 
-    def truncate(messages, tokenizer, maximum, *, keep="tail"):
-        """Drop one token at the sampled boundary, as upstream's decode normalization can."""
-        keep_tokens = maximum - 1 if maximum == 100 else maximum
-        return [{"role": "user", "content": messages[0]["content"][:keep_tokens]}]
+    monkeypatch.setattr(runtime, "INFERENCE", tmp_path / "inference")
+    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path / "artifacts")
+    commands = []
+    monkeypatch.setattr(runtime, "run_upstream", lambda command, log, **kwargs: commands.append(command))
+    options = upstream_options(request_limit=10)
+    folder = runtime.speed_baseline(options)
+    assert folder == tmp_path / "inference/baselines/speed/torch/inference_scenario_a_input_heavy/mistralai_Mistral-7B-Instruct-v0.3"
+    [command] = commands
+    assert command[1:3] == ["-m", "src.eval.inference.precompute_baseline"]
+    flags = dict(zip(command[3::2], command[4::2]))
+    assert flags["--scenario-id"] == "inference_scenario_a_input_heavy" and flags["--seed"] == "1337"
+    assert flags["--out-root"] == str(tmp_path / "inference/baselines/speed/torch")
+    assert flags["--registry"] == str(tmp_path / "inference/baselines/speed/torch/mistralai_Mistral-7B-Instruct-v0.3.json")
+    assert flags["--request-timeout-s"] == "900" and flags["--concurrency-override"] == "1" and flags["--request-limit"] == "10"
 
-    runner = SimpleNamespace(
-        _get_tokenizer=lambda model: None,
-        _compute_max_input_tokens=lambda max_model_len, output_len: None,
-        _range_ratio=lambda value: float(value),
-        _count_chat_tokens=lambda messages, tokenizer: len(messages[0]["content"]),
-        _truncate_messages=truncate,
-    )
-
-    def prepare(config, limit, tokenizer, max_model_len):
-        """Sample one prompt and apply upstream's range check through the module-level truncation hook."""
-        messages = runner._truncate_messages([{"role": "user", "content": "x" * 100}], tokenizer, 100, keep="head")
-        realized = runner._count_chat_tokens(messages, tokenizer)
-        if not (100 <= realized <= 100):
-            raise RuntimeError("Sampled LongBench-v2 request realized outside input range")
-        return [{"messages": messages}], None
-
-    runner._prepare_requests = prepare
-    monkeypatch.setitem(sys.modules, "inference", SimpleNamespace(runner=runner))
-    options = {"base_model": "m", "max_model_len": 32768, "request_limit": 1}
-    config = {"synthetic": {"input_len": 100, "output_len": 10, "range_ratio": 1.0}}
-    requests, repairs = runtime.prepare_requests(options, config, "heldout")
-    assert len(requests[0]["messages"][0]["content"]) == 100
-    assert repairs == [{"target_input_token_count": 100, "original_input_token_count": 99, "repaired_input_token_count": 100}]
-    assert runner._truncate_messages is truncate
-    with pytest.raises(RuntimeError, match="outside input range"):
-        prepare(config, 1, None, 32768)
+    (tmp_path / "artifacts/cached").mkdir(parents=True)
+    for name in ["requests.jsonl", "baseline_metrics.json"]:
+        (tmp_path / "artifacts/cached" / name).write_text(name)
+    runtime.speed_baseline({**options, "cached_speed_baseline": True})
+    assert len(commands) == 1 and (folder / "baseline_metrics.json").read_text() == "baseline_metrics.json"
 
 
-def test_prepare_failure_retains_measured_speed_baseline(monkeypatch, tmp_path):
-    """Store a completed speed measurement when the reference fails afterwards, so the retry skips it."""
-    environment = importlib.import_module("inferencebench.environment")
-    monkeypatch.setattr(environment, "BASELINE_CACHE", tmp_path / "baselines")
-    written, uploads, outcomes = {}, [], ["fail", "pass"]
+def fake_quality_runs(tmp_path, monkeypatch, outcomes):
+    """Replace upstream's quality precompute with scripted generation rows, first for all questions and then per retry."""
+    from inferencebench.assets.scripts import runtime
 
-    async def execute(command, **kwargs):
-        """Fail the first preparation after its speed measurement, then succeed."""
-        if command[0] == "nvidia-smi":
-            return ExecResult(success=True, returncode=0, stdout="name, memory.total [MiB], driver_version\nNVIDIA H100 80GB HBM3, 81559 MiB, 580.95.05\n", stderr="")
-        if "prepare" in command and outcomes.pop(0) == "fail":
-            return ExecResult(success=False, returncode=1, stdout="", stderr="Transformers quality baseline did not complete every request")
+    samples = [{"sample_id": str(i), "messages": [{"role": "user", "content": str(i)}], "gold_answer": "A", "max_new_tokens": 2048, "temperature": 0} for i in range(2)]
+    source = tmp_path / "samples/mmlu_pro/248_2/samples.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text("".join(json.dumps(row) + "\n" for row in samples))
+    calls = []
+
+    def run_upstream(command, log, env=None, **kwargs):
+        """Write the registry and generation rows the real command would leave behind."""
+        flags = dict(zip(command[3::2], command[4::2]))
+        calls.append((flags, env or {}))
+        out = Path(flags["--out-root"]) / "mmlu_pro" / f"{flags['--seed']}_{flags['--mmlupro-n']}"
+        out.mkdir(parents=True, exist_ok=True)
+        if flags["--mmlupro-n"] != "1":
+            rows = [{"sample_id": str(i), "request_index": i, "gold_answer": "A", **outcome} for i, outcome in enumerate(outcomes[0])]
+        else:
+            selected = json.loads(Path(env["INFERENCE_BENCH_QUALITY_MMLUPRO_SAMPLES_FILE"]).read_text())
+            rows = [{"sample_id": selected["sample_id"], "request_index": 0, "gold_answer": "A", **outcomes[len(calls) - 1][0]}]
+        (out / "baseline_generations.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+        correct = [row for row in rows if row.get("parsed_answer") == "A"]
+        Path(flags["--registry"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(flags["--registry"]).write_text(json.dumps({"datasets": {"mmlu_pro": [{"seed": int(flags["--seed"]), "n": int(flags["--mmlupro-n"]), "accuracy": len(correct) / len(rows)}]}}))
+
+    monkeypatch.setattr(runtime, "run_upstream", run_upstream)
+    monkeypatch.setattr(runtime, "INFERENCE", tmp_path / "inference")
+    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path / "artifacts")
+    monkeypatch.setitem(sys.modules, "inference", SimpleNamespace(
+        quality_gate=SimpleNamespace(get_quality_specs=lambda: ([SimpleNamespace(samples_file=source, seed=248, limit=2)], 0.95, None)),
+        precompute_quality_baseline=SimpleNamespace(_accuracy=lambda rows: sum(row.get("parsed_answer") == row["gold_answer"] for row in rows) / len(rows)),
+    ))
+    return calls
+
+
+@pytest.mark.parametrize("attempts,retry_success,expected", [(1, None, "accepted"), (2, True, "repaired"), (2, False, "error")])
+def test_quality_reference_completion_policy(monkeypatch, tmp_path, attempts, retry_success, expected):
+    """Accept upstream's registry as measured at one attempt, or retry failed questions alone and require completeness."""
+    from inferencebench.assets.scripts import runtime
+
+    first = [{"success": True, "parsed_answer": "B"}, {"success": False, "parsed_answer": None, "error": "timeout after 300s"}]
+    retry = [{"success": bool(retry_success), "parsed_answer": "A" if retry_success else None}]
+    calls = fake_quality_runs(tmp_path, monkeypatch, [first, retry])
+    options = upstream_options(quality_samples=2, quality_baseline_max_attempts=attempts, quality_reference_backend="transformers")
+    if expected == "error":
+        with pytest.raises(RuntimeError, match="did not complete every request"):
+            runtime.quality_reference(options)
+        return
+    reference = runtime.quality_reference(options)
+    registry = json.loads(reference["registry"].read_text())["datasets"]["mmlu_pro"][0]
+    assert reference["registry"].name == "mistralai_Mistral-7B-Instruct-v0.3_torch.json" and reference["concurrency"] == 1
+    assert calls[0][0]["--backend"] == "torch" and calls[0][0]["--concurrency"] == "1" and calls[0][0]["--request-timeout-s"] == "300"
+    if expected == "accepted":
+        assert len(calls) == 1 and registry["accuracy"] == 0.0 and reference["complete"] is False
+        return
+    assert len(calls) == 2 and calls[1][0]["--concurrency"] == "1" and calls[1][0]["--mmlupro-n"] == "1"
+    assert json.loads(Path(calls[1][1]["INFERENCE_BENCH_QUALITY_MMLUPRO_SAMPLES_FILE"]).read_text())["sample_id"] == "1"
+    assert registry["accuracy"] == 0.5 and "retried" in registry["note"] and reference["retried_requests"] == 1
+    resolved = [json.loads(line) for line in reference["generations"].with_name("resolved_generations.jsonl").read_text().splitlines()]
+    assert [row["request_index"] for row in resolved] == [0, 1] and resolved[0]["parsed_answer"] == "B" and resolved[1]["success"]
+
+
+@pytest.mark.parametrize("backend", ["transformers", "vllm"])
+def test_prepare_orders_servers_and_records_provenance(monkeypatch, tmp_path, backend):
+    """Start upstream's Transformers server for the speed baseline, measure the reference on the configured backend, and record provenance."""
+    from inferencebench.assets.scripts import runtime
+    from inferencebench.vendored import UPSTREAM
+
+    calls = fake_quality_runs(tmp_path, monkeypatch, [[{"success": True, "parsed_answer": "A"}, {"success": True, "parsed_answer": "B"}]])
+    events = []
+    real_quality = runtime.run_upstream
+
+    def run_upstream(command, log, env=None, **kwargs):
+        """Record upstream commands and leave the speed files the precompute would write."""
+        module = command[2]
+        events.append(module.rsplit(".", 1)[-1])
+        if module.endswith("precompute_baseline"):
+            folder = Path(dict(zip(command[3::2], command[4::2]))["--out-root"]) / "inference_scenario_a_input_heavy" / "mistralai_Mistral-7B-Instruct-v0.3"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "requests.jsonl").write_text('{"messages": []}\n')
+            (folder / "baseline_metrics.json").write_text(json.dumps({"baseline": measurements()}))
+        elif module.endswith("precompute_quality_baseline"):
+            real_quality(command, log, env=env, **kwargs)
+
+    monkeypatch.setattr(runtime, "run_upstream", run_upstream)
+    monkeypatch.setattr(runtime, "ROOT", UPSTREAM)
+    monkeypatch.setattr(runtime, "TASK", tmp_path / "task")
+    monkeypatch.setattr(runtime, "TRUSTED", tmp_path / "artifacts/trusted")
+    monkeypatch.setattr(runtime, "BUNDLE", tmp_path / "bundle")
+    monkeypatch.setattr(runtime, "PROFILE", tmp_path / "profile.d/inferencebench.sh")
+    (tmp_path / "task").mkdir()
+    (tmp_path / "artifacts/install").mkdir(parents=True)
+    (tmp_path / "artifacts/install/upstream.lock").write_text(json.dumps({"commit": "abc", "tree": "def"}))
+    (tmp_path / "inference/baselines/samples").mkdir(parents=True)
+    for name in runtime.BUNDLE_FILES:
+        (tmp_path / "inference" / name).write_bytes((UPSTREAM / "src/eval/inference" / name).read_bytes())
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=lambda *args, **kwargs: str(tmp_path / "snapshots/rev")))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    monkeypatch.setattr(runtime, "wait_ready", Mock(return_value=True))
+    monkeypatch.setattr(runtime.subprocess, "check_output", Mock(return_value="0.19.0\n"))
+    commands = []
+
+    def popen(command, **kwargs):
+        """Record each server launch as a live process."""
+        events.append(("start", command[3] if command[0] == "python3" else command[1]))
+        commands.append(command)
+        return Mock(pid=len(events), poll=Mock(return_value=None), wait=Mock())
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", popen)
+    monkeypatch.setattr(runtime.os, "killpg", Mock(side_effect=lambda pid, sig: events.append("stop")))
+
+    options = upstream_options(quality_samples=2, quality_reference_backend=backend, baseline_dtype="bfloat16")
+    runtime.prepare(options)
+    assert all(command[command.index("--dtype") + 1] == "bfloat16" for command in commands)
+    assert commands[0][:4] == ["python3", "-u", "-m", "src.eval.inference.servers.transformers_openai_server"]
+    transformers, vllm = ("start", "src.eval.inference.servers.transformers_openai_server"), ("start", "serve")
+    if backend == "transformers":
+        assert events == ["cache_samples", "cache_samples", "cache_samples", transformers, "precompute_baseline", "precompute_quality_baseline", "stop"]
+        assert calls[0][0]["--concurrency"] == "1" and calls[0][0]["--backend"] == "torch"
+    else:
+        assert events == ["cache_samples", "cache_samples", "cache_samples", transformers, "precompute_baseline", "stop", vllm, "precompute_quality_baseline", "stop"]
+        assert calls[0][0]["--concurrency"] == "4" and calls[0][0]["--backend"] == "vllm" and calls[0][0]["--registry"].endswith("/mistralai_Mistral-7B-Instruct-v0.3.json")
+    trusted = tmp_path / "artifacts/trusted"
+    provenance = json.loads((trusted / "provenance.json").read_text())
+    assert provenance["quality_reference"] == {"backend": backend, "vllm_version": "0.19.0" if backend == "vllm" else None, "concurrency": 1 if backend == "transformers" else 4, "retried_requests": 0, "complete": True}
+    assert provenance["upstream"]["commit"] == "abc" and provenance["speed_baseline"] == "measured" and provenance["downloaded_model_revision"] == "rev"
+    assert (trusted / "speed/requests.jsonl").is_file() and (trusted / "speed/baseline_metrics.json").is_file()
+    assert (trusted / "quality/samples.jsonl").is_file() and (trusted / "quality/baseline_generations.jsonl").is_file()
+    assert json.loads((trusted / "environment.json").read_text())["INFERENCE_BENCH_QUALITY_BASELINE_BACKEND"] == ("torch" if backend == "transformers" else "vllm")
+    assert (tmp_path / "bundle/runner.py").is_file() and (tmp_path / "bundle/baselines/quality").is_dir() and (tmp_path / "task/evaluate.py").is_file()
+
+
+@pytest.mark.parametrize(
+    "dead,error,expected",
+    [
+        (True, "Timed out waiting for server at http://127.0.0.1:8000", "launcher"),
+        (False, "Timed out waiting for server at http://127.0.0.1:8000", "unreachable"),
+        (True, "broken dataset", "launcher"),
+        (False, "broken dataset", "error"),
+    ],
+)
+def test_final_evaluation_failures(local_task, monkeypatch, tmp_path, dead, error, expected):
+    """Score a dead launcher or unreachable server as invalid, like upstream, while other evaluator failures stay errors."""
+    from inferencebench.assets.scripts import runtime
+
+    task, env = local_task
+    process = Mock(returncode=1 if dead else None)
+    process.poll.return_value = 1 if dead else None
+    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path)
+    monkeypatch.setattr(runtime, "restore_trusted", Mock())
+    monkeypatch.setattr(runtime.shutil, "copy", Mock())
+    monkeypatch.setattr(runtime.subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(runtime.os, "killpg", Mock())
+    monkeypatch.setattr(runtime, "wait_ready", Mock(return_value=True))
+    monkeypatch.setattr(runtime, "evaluate", Mock(return_value={"scenario": "A", "model_id": "m", "profiles": {}, "vram_peak_mb": 0.0, "error": error}))
+
+    async def execute(*args, **kwargs):
+        """Drive the actual runtime failure path through Inspect's normal scorer."""
+        runtime.final(task.dataset[0].metadata)
         return ExecResult(success=True, returncode=0, stdout="", stderr="")
 
     async def read_file(path):
-        """Serve preparation outputs; provenance exists only once preparation completes."""
-        name = path.rsplit("/", 1)[-1]
-        if name == "final.json":
-            return json.dumps(measurements(2))
-        if name == "baseline.json":
-            return json.dumps(measurements())
-        if name == "provenance.json":
-            if outcomes:
-                raise FileNotFoundError(path)
-            return json.dumps({"downloaded_model_revision": "rev", "input_sha256": {}})
-        if name == "heldout-requests.jsonl":
-            return '{"messages": []}\n'
-        return "{}"
+        """Return the runtime's recorded failure evidence to the real scorer."""
+        return (tmp_path / path.rsplit("/", 1)[-1]).read_text() if path.endswith("final.json") else ""
+
+    env.exec.side_effect = execute
+    env.read_file = read_file
+    [log] = inspect_eval(task, solver=generate(), model="mockllm/subject", display="none", log_dir="logs")
+    if expected == "error":
+        assert log.status == "error" and "broken dataset" in log.samples[0].error.message
+        assert not log.samples[0].scores
+        return
+    assert log.status == "success", log.error
+    score = log.samples[0].scores["inference_speedup"]
+    assert score.value == {"speedup": 1.0}
+    assert score.metadata["final"]["evaluator_error"] == error
+    if expected == "launcher":
+        assert score.explanation == "Canonical launcher exited during final evaluation" and score.metadata["final"]["launcher_returncode"] == 1
+    else:
+        assert score.explanation == error
+
+
+def test_final_evaluation_uses_upstream_command_and_retries(monkeypatch, tmp_path):
+    """Run upstream's task evaluate.py against the restored requests, retrying on its schedule until metrics exist."""
+    from inferencebench.assets.scripts import runtime
+    from inferencebench.vendored import UPSTREAM
+
+    monkeypatch.setattr(runtime, "ROOT", UPSTREAM)
+    monkeypatch.setattr(runtime, "INFERENCE", tmp_path / "inference")
+    monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path / "artifacts")
+    attempts = []
+
+    def run_upstream(command, log, env=None, timeout=None, check=True):
+        """Fail twice, then write metrics on the third attempt."""
+        attempts.append((command, env, timeout, check))
+        if len(attempts) == 3:
+            Path(command[command.index("--json-output-file") + 1]).write_text(json.dumps(measurements()))
+        return 1
+
+    monkeypatch.setattr(runtime, "run_upstream", run_upstream)
+    options = upstream_options(request_limit=10)
+    assert runtime.evaluate(options) == measurements()
+    assert len(attempts) == 3
+    command, env, timeout, check = attempts[0]
+    assert command[1] == str(UPSTREAM / "src/eval/tasks/inference_scenario_a_input_heavy/evaluate.py")
+    flags = dict(zip(command[2::2], command[3::2]))
+    assert flags["--requests-file"] == str(tmp_path / "inference/baselines/speed/torch/inference_scenario_a_input_heavy/mistralai_Mistral-7B-Instruct-v0.3/requests.jsonl")
+    assert flags["--quality-tau"] == "0.95" and flags["--request-limit"] == "10" and "--request-timeout-s" not in flags
+    assert env == {"INFERENCE_BENCH_DATASET_SEED": "1337"} and timeout == 3600 and check is False
+    attempts.clear()
+    monkeypatch.setattr(runtime, "run_upstream", lambda command, log, **kwargs: attempts.append(command) and 1)
+    assert runtime.evaluate(options) is None
+    assert len(attempts) == 5 and [("--request-timeout-s" in command) for command in attempts] == [False, False, False, True, True]
+    assert attempts[3][attempts[3].index("--request-timeout-s") + 1] == "150"
+
+
+def prepare_archive(rows, provenance=True):
+    """Build the archive the sandbox returns after preparation, with the trusted files the host keeps."""
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        def add(name, text):
+            """Add one text file under trusted/."""
+            data = text.encode()
+            info = tarfile.TarInfo(f"trusted/{name}")
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+        add("speed/requests.jsonl", rows)
+        add("speed/baseline_metrics.json", json.dumps({"baseline": measurements()}))
+        add("speed/baseline_generations.jsonl", "{}\n")
+        if provenance:
+            add("quality/samples.jsonl", "{}\n")
+            add("provenance.json", json.dumps({"downloaded_model_revision": "rev", "speed_baseline": "measured"}))
+            add("environment.json", json.dumps({"INFERENCE_BENCH_BASE_MODEL": "mistralai/Mistral-7B-Instruct-v0.3"}))
+    return buffer.getvalue()
+
+
+def host_environment(tmp_path, prepare_outcomes):
+    """Fake a GPU sandbox for the host preparation solver, scripting each preparation's success and archive."""
+    written, uploads, prepares = {}, [], []
+
+    async def execute(command, **kwargs):
+        """Answer the GPU inventory, record installs and preparations, and script preparation outcomes."""
+        if command[0] == "nvidia-smi":
+            return ExecResult(success=True, returncode=0, stdout="name, memory.total [MiB], driver_version\nNVIDIA H100 80GB HBM3, 81559 MiB, 580.95.05\n", stderr="")
+        if "prepare" in command:
+            prepares.append(json.loads(written["options"]))
+            outcome = prepare_outcomes.pop(0)
+            return ExecResult(success=outcome == "pass", returncode=0 if outcome == "pass" else 1, stdout="", stderr="reference failed")
+        return ExecResult(success=True, returncode=0, stdout="", stderr="")
+
+    async def read_file(path):
+        """Serve the final measurement to the scorer."""
+        return json.dumps(measurements(2)) if path.endswith("final.json") else ""
 
     async def write_file(path, content):
         """Capture the options handed to the sandbox runtime."""
         if path.endswith("options.json"):
             written["options"] = content
+        if path.endswith("upstream.tar"):
+            written["upstream"] = len(content)
 
     async def upload(local, remote):
         """Record which shared files reach the sandbox."""
         uploads.append(Path(local).name)
 
     async def download(remote, local):
-        """Materialise the measured files locally."""
-        Path(local).write_text("x")
+        """Return the preparation archive, with provenance only after a successful preparation."""
+        Path(local).write_bytes(prepare_archive('{"messages": []}\n', provenance=written.get("last_prepare_passed", True)))
 
     env = SimpleNamespace(resource_id="pod", exec=execute, read_file=read_file, write_file=write_file, upload=upload, download=download, terminate=AsyncMock())
+    return env, written, uploads, prepares
+
+
+def test_speed_baseline_reuse(monkeypatch, tmp_path):
+    """Measure the speed baseline once per workload and GPU model, install the upstream copy each time, and share the stored files."""
+    environment = importlib.import_module("inferencebench.environment")
+    monkeypatch.setattr(environment, "BASELINE_CACHE", tmp_path / "baselines")
+    env, written, uploads, prepares = host_environment(tmp_path, ["pass", "pass", "pass"])
+    monkeypatch.setattr(environment, "gpu_environment", lambda: env)
+    monkeypatch.setattr(SCORERS, "restart_for_scoring", AsyncMock(return_value=env))
+
+    def run(**overrides):
+        """Run one sample through the real preparation solver and return its metadata."""
+        task = inference_bench(**{"scenarios": "A", "seed_pairs": [[21, 1337]], "agent_seconds": 2, **overrides})
+        task.sandbox = None
+        [log] = inspect_eval(task, solver=generate(), model="mockllm/subject", model_roles={"integrity": judge_model()}, display="none", log_dir="logs")
+        assert log.status == "success", log.error
+        return log.samples[0].metadata
+
+    first = run()
+    assert written["upstream"] > 100_000
+    assert prepares[-1]["cached_speed_baseline"] is False and first["speed_baseline"]["source"] == "measured"
+    assert first["provenance"]["downloaded_model_revision"] == "rev"
+    [stored] = list((tmp_path / "baselines").iterdir())
+    manifest = json.loads((stored / "manifest.json").read_text())
+    assert manifest["identity"]["gpu"] == "NVIDIA H100 80GB HBM3" and manifest["identity"]["scenario"] == "A" and manifest["identity"]["eval_seed"] == 1337
+    assert manifest["identity"]["upstream_commit"].startswith("24cdf88") and manifest["identity"]["patches"]
+    assert all((stored / name).exists() for name in ["requests.jsonl", "baseline_metrics.json", "baseline_generations.jsonl"])
+    assert uploads == []
+
+    second = run()
+    assert prepares[-1]["cached_speed_baseline"] is True and second["speed_baseline"]["source"] == "cache"
+    assert sorted(uploads) == ["baseline_metrics.json", "requests.jsonl"]
+    assert second["speed_baseline"]["folder"] == str(stored.resolve())
+
+    run(seed_pairs=[[21, 428]])
+    assert prepares[-1]["cached_speed_baseline"] is False and len(list((tmp_path / "baselines").iterdir())) == 2
+
+
+def test_prepare_failure_retains_measured_speed_baseline(monkeypatch, tmp_path):
+    """Store a completed speed measurement when the reference fails afterwards, so the retry skips it."""
+    environment = importlib.import_module("inferencebench.environment")
+    monkeypatch.setattr(environment, "BASELINE_CACHE", tmp_path / "baselines")
+    env, written, uploads, prepares = host_environment(tmp_path, ["fail", "pass"])
+    original_execute = env.exec
+
+    async def execute(command, **kwargs):
+        """Mark whether the last preparation passed so the archive omits provenance after a failure."""
+        result = await original_execute(command, **kwargs)
+        if "prepare" in command:
+            written["last_prepare_passed"] = result.success
+        return result
+
+    env.exec = execute
     monkeypatch.setattr(environment, "gpu_environment", lambda: env)
     monkeypatch.setattr(SCORERS, "restart_for_scoring", AsyncMock(return_value=env))
 
@@ -2004,14 +1942,11 @@ def test_prepare_failure_retains_measured_speed_baseline(monkeypatch, tmp_path):
         return log
 
     failed = run()
-    assert failed.status == "error" and "did not complete every request" in failed.error.message
+    assert failed.status == "error" and "reference failed" in failed.error.message
     [stored] = list((tmp_path / "baselines").iterdir())
-    manifest = json.loads((stored / "manifest.json").read_text())
-    assert manifest["downloaded_model_revision"] is None and manifest["identity"]["scenario"] == "A"
-    assert (stored / "baseline.json").exists() and (stored / "heldout-requests.jsonl").exists()
-
+    assert (stored / "requests.jsonl").exists() and (stored / "baseline_metrics.json").exists()
     passed = run()
     assert passed.status == "success", passed.error
-    assert json.loads(written["options"])["cached_speed_baseline"] is True
-    assert sorted(uploads) == ["baseline.json", "heldout-requests.jsonl"]
+    assert prepares[-1]["cached_speed_baseline"] is True
+    assert sorted(uploads) == ["baseline_metrics.json", "requests.jsonl"]
     assert passed.samples[0].metadata["speed_baseline"]["source"] == "cache"

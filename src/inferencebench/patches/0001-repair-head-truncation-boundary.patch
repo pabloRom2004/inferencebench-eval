@@ -1,0 +1,27 @@
+diff --git a/src/eval/inference/runner.py b/src/eval/inference/runner.py
+index 1af35fd..0d1182c 100644
+--- a/src/eval/inference/runner.py
++++ b/src/eval/inference/runner.py
+@@ -496,6 +496,22 @@ def _prepare_requests(
+         messages = [dict(m) for m in item["messages"]]
+         messages = _truncate_messages(messages, tokenizer, target_input_tokens, keep="head")
+         realized_input_tokens = _count_chat_tokens(messages, tokenizer)
++        if realized_input_tokens < min_input_tokens:
++            # Decoding the head-truncated token slice can normalize away a token at the
++            # boundary; re-truncate with the shortfall added back instead of aborting.
++            retried = _truncate_messages(
++                [dict(m) for m in item["messages"]],
++                tokenizer,
++                target_input_tokens + (min_input_tokens - realized_input_tokens),
++                keep="head",
++            )
++            retried_tokens = _count_chat_tokens(retried, tokenizer)
++            if min_input_tokens <= retried_tokens <= target_input_tokens:
++                print(
++                    f"[eval:speed] repaired head truncation: request_index={req_idx} "
++                    f"realized={realized_input_tokens} -> {retried_tokens} target={target_input_tokens}"
++                )
++                messages, realized_input_tokens = retried, retried_tokens
+         if not (min_input_tokens <= realized_input_tokens <= target_input_tokens):
+             raise RuntimeError(
+                 "Sampled LongBench-v2 request realized outside input range: "

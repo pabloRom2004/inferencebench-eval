@@ -1,8 +1,10 @@
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
+import tarfile
 import time
 from pathlib import Path
 from typing import Any
@@ -15,15 +17,18 @@ from inspect_ai.model import ModelInfo, get_model, get_model_info, set_model_inf
 from inspect_ai.solver import Solver, solver
 from inspect_ai.util import sandbox, store
 
+from inferencebench.dataset import num_hours_text
 from inferencebench.modal_sandbox import InferenceSandbox
 from inferencebench.prompts import ASSETS
-from inferencebench.run_config import load_config
 from inferencebench.runpod_sandbox import RunPodSandbox
+from inferencebench.vendored import patch_digest, upstream_archive, upstream_lock
 
 REMOTE = "/tmp/inferencebench"
+EVALUATOR = "/opt/evaluator/bin/python"
+UPSTREAM_ROOT = "/opt/inferencebench"
 # Speed baselines measured once per workload and GPU model, shared by later samples like upstream's precomputed registry.
 BASELINE_CACHE = Path("run-artifacts") / "baselines"
-SPEED_BASELINE_FILES = ("baseline.json", "heldout-requests.jsonl")
+SPEED_BASELINE_FILES = ("requests.jsonl", "baseline_metrics.json")
 
 
 def gpu_model(inventory: str) -> str:
@@ -33,10 +38,11 @@ def gpu_model(inventory: str) -> str:
 
 
 def speed_baseline_identity(options: dict[str, Any], gpu: str) -> dict[str, Any]:
-    """Identify a reusable Transformers speed baseline by workload, precision, evaluator revision, and GPU model."""
+    """Identify a reusable Transformers speed baseline by workload, precision, upstream code, and GPU model."""
     return {
-        "format_version": 1,
-        "upstream_revision": load_config("eval.yaml")["revision"],
+        "format_version": 2,
+        "upstream_commit": upstream_lock()["commit"],
+        "patches": patch_digest(),
         "gpu": gpu,
         **{key: options[key] for key in (
             "base_model", "scenario", "eval_seed", "request_limit", "max_model_len", "baseline_dtype",
@@ -66,15 +72,15 @@ def cached_speed_baseline(identity: dict[str, Any]) -> Path | None:
     return folder
 
 
-def store_speed_baseline(identity: dict[str, Any], sample_folder: Path, provenance: dict[str, Any]) -> Path:
+def store_speed_baseline(identity: dict[str, Any], measured: Path, provenance: dict[str, Any]) -> Path:
     """Publish a freshly measured baseline for later samples, replacing any previous copy atomically."""
     folder = speed_baseline_folder(identity)
     staging = folder.with_name(folder.name + ".staging")
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
-    for name in [*SPEED_BASELINE_FILES, "baseline-generations.jsonl"]:
-        if (sample_folder / name).is_file():
-            shutil.copyfile(sample_folder / name, staging / name)
+    for name in [*SPEED_BASELINE_FILES, "baseline_generations.jsonl"]:
+        if (measured / name).is_file():
+            shutil.copyfile(measured / name, staging / name)
     (staging / "manifest.json").write_text(json.dumps(
         {"identity": identity, "measured_at": time.time(), **provenance}, indent=2,
     ))
@@ -83,22 +89,12 @@ def store_speed_baseline(identity: dict[str, Any], sample_folder: Path, provenan
     return folder
 
 
-async def retain_speed_baseline(env, folder: Path, identity: dict[str, Any], provenance: dict[str, Any]) -> Path | None:
-    """Download a completed speed measurement from the sandbox and publish it for later samples."""
-    for name in SPEED_BASELINE_FILES:
-        try:
-            await env.download(f"{REMOTE}/{name}", str(folder / name))
-        except Exception:
-            return None
-    try:
-        await env.download(f"{REMOTE}/baseline-generations.jsonl", str(folder / "baseline-generations.jsonl"))
-    except Exception as error:
-        (folder / "baseline-generations-copy-error.txt").write_text(repr(error))
-    try:
-        revision = json.loads(await env.read_file(f"{REMOTE}/provenance.json")).get("downloaded_model_revision")
-    except Exception:
-        revision = None
-    return store_speed_baseline(identity, folder, {**provenance, "downloaded_model_revision": revision})
+def archive_bytes(folder: Path, arcname: str) -> bytes:
+    """Pack one local folder for upload into a sandbox."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        archive.add(folder, arcname=arcname)
+    return buffer.getvalue()
 
 
 @hooks(name="inferencebench_artifacts", description="Retain InferenceBench submissions and measurements on Hawk")
@@ -135,14 +131,6 @@ def gpu_environment() -> InferenceSandbox | RunPodSandbox:
         return env.as_type(RunPodSandbox)
 
 
-def workspace_env(options: dict) -> dict[str, str]:
-    """Name the served model and context for the agent's shells, overriding the image's static defaults."""
-    return {
-        "INFERENCE_BENCH_BASE_MODEL": options["base_model"],
-        "INFERENCE_BENCH_MAX_MODEL_LEN": str(options["max_model_len"]),
-    }
-
-
 async def checked_exec(env, command: list[str], timeout: int) -> str:
     """Execute harness infrastructure and raise on failure instead of assigning the subject a score."""
     result = await env.exec(command, timeout=timeout, timeout_retry=False)
@@ -151,6 +139,15 @@ async def checked_exec(env, command: list[str], timeout: int) -> str:
             f"Harness command failed ({result.returncode}): {result.stdout}\n{result.stderr}"
         )
     return result.stdout
+
+
+async def install_upstream(env, options: dict[str, Any]) -> None:
+    """Install the untouched upstream copy and the port's patches from this package into the sandbox."""
+    await checked_exec(env, ["mkdir", "-p", REMOTE], 30)
+    await env.write_file(f"{REMOTE}/runtime.py", (ASSETS / "scripts" / "runtime.py").read_text())
+    await env.write_file(f"{REMOTE}/options.json", json.dumps(options))
+    await env.write_file(f"{REMOTE}/upstream.tar", upstream_archive())
+    await checked_exec(env, [EVALUATOR, f"{REMOTE}/runtime.py", "install", f"{REMOTE}/options.json"], 600)
 
 
 @solver
@@ -173,7 +170,6 @@ def prepare_environment() -> Solver:
         )
         folder.mkdir(parents=True)
         store().set("artifacts", str(folder.resolve()))
-        store().set("workspace_env", workspace_env(state.metadata))
 
         # Record the GPU allocated to this sample.
         state.metadata["agent_sandbox_id"] = env.resource_id
@@ -198,47 +194,43 @@ def prepare_environment() -> Solver:
         )
         (folder / "gpu.txt").write_text(inventory)
 
-        await checked_exec(env, ["mkdir", "-p", REMOTE], 30)
-        await env.write_file(
-            f"{REMOTE}/runtime.py", (ASSETS / "scripts" / "runtime.py").read_text()
-        )
         # Reuse a speed baseline already measured for this workload on this GPU model.
         identity = speed_baseline_identity(state.metadata, gpu_model(inventory))
         cached = cached_speed_baseline(identity)
         state.metadata["cached_speed_baseline"] = cached is not None
+        await install_upstream(env, state.metadata)
         if cached is not None:
+            await checked_exec(env, ["mkdir", "-p", f"{REMOTE}/cached"], 30)
             for name in SPEED_BASELINE_FILES:
-                await env.upload(str(cached / name), f"{REMOTE}/{name}")
-        await env.write_file(f"{REMOTE}/options.json", json.dumps(state.metadata))
+                await env.upload(str(cached / name), f"{REMOTE}/cached/{name}")
 
         # Build reference measurements before the agent clock starts.
         try:
             output = await checked_exec(
                 env,
-                [
-                    "/opt/evaluator/bin/python",
-                    f"{REMOTE}/runtime.py",
-                    "prepare",
-                    f"{REMOTE}/options.json",
-                ],
+                [EVALUATOR, f"{REMOTE}/runtime.py", "prepare", f"{REMOTE}/options.json"],
                 43200,
             )
         finally:
-            # Preserve failed attempts even when preparation aborts before optimization.
+            # Preserve measurements and logs even when preparation aborts before optimization.
             with anyio.CancelScope(shield=True):
                 try:
-                    archive = await env.exec(["tar", "-czf", f"{REMOTE}/quality-baseline.tar.gz",
-                                              "-C", REMOTE, "quality-baseline"], timeout=60)
+                    archive = await env.exec(
+                        ["bash", "-c", f"cd {REMOTE} && tar -czf prepare-artifacts.tar.gz --ignore-failed-read trusted *.log"],
+                        timeout=120,
+                    )
                     if archive.success:
-                        await env.download(f"{REMOTE}/quality-baseline.tar.gz", str(folder / "quality-baseline.tar.gz"))
+                        await env.download(f"{REMOTE}/prepare-artifacts.tar.gz", str(folder / "prepare-artifacts.tar.gz"))
+                        with tarfile.open(folder / "prepare-artifacts.tar.gz") as retained:
+                            retained.extractall(folder, filter="data")
                     else:
-                        (folder / "quality-baseline-copy-error.txt").write_text(archive.stderr)
+                        (folder / "prepare-artifacts-error.txt").write_text(archive.stderr)
                 except Exception as error:
-                    (folder / "quality-baseline-copy-error.txt").write_text(repr(error))
+                    (folder / "prepare-artifacts-error.txt").write_text(repr(error))
                 # A completed speed measurement is reusable even when the reference fails afterwards.
-                if cached is None:
+                if cached is None and all((folder / "trusted" / "speed" / name).is_file() for name in SPEED_BASELINE_FILES):
                     try:
-                        cached = await retain_speed_baseline(env, folder, identity, {
+                        cached = store_speed_baseline(identity, folder / "trusted" / "speed", {
                             "gpu_inventory": inventory,
                             "provider": state.metadata["gpu_provider"],
                             "sample": folder.name,
@@ -247,57 +239,35 @@ def prepare_environment() -> Solver:
                         (folder / "speed-baseline-store-error.txt").write_text(repr(error))
         (folder / "prepare.log").write_text(output)
 
-        # Keep trusted scoring inputs outside the agent sandbox.
-        for name in [
-            "baseline.json",
-            "quality.json",
-            "heldout-requests.jsonl",
-            "quality-samples.jsonl",
-            "provenance.json",
-        ]:
-            content = await env.read_file(f"{REMOTE}/{name}")
-            (folder / name).write_text(content)
-        state.metadata["provenance"] = json.loads(
-            (folder / "provenance.json").read_text()
-        )
+        # Trusted scoring inputs now live outside the agent sandbox.
+        state.metadata["provenance"] = json.loads((folder / "trusted" / "provenance.json").read_text())
+        store().set("workspace_env", json.loads((folder / "trusted" / "environment.json").read_text()))
         state.metadata["speed_baseline"] = {
             "source": "cache" if state.metadata["cached_speed_baseline"] else "measured",
             "folder": str(cached.resolve()) if cached is not None else None,
         }
-        await checked_exec(
-            env,
-            [
-                "tar",
-                "--exclude=baselines",
-                "-czf",
-                f"{REMOTE}/evaluator.tar.gz",
-                "-C",
-                "/opt/inferencebench",
-                "src/eval",
-            ],
-            60,
-        )
-        await env.download(
-            f"{REMOTE}/evaluator.tar.gz", str(folder / "evaluator.tar.gz")
-        )
 
         seconds = state.metadata["agent_seconds"]
         deadline = time.time() + seconds if seconds is not None else None
         store().set("deadline", deadline)
-        timer = (
-            f'#!/bin/sh\necho "$(( {int(deadline)} - $(date +%s) )) seconds remaining"\n'
-            if deadline is not None
-            else '#!/bin/sh\necho "No wall-clock limit; use the token-budget reminders."\n'
-        )
-        await env.write_file("/home/agent/task/timer.sh", timer)
-        await checked_exec(env, ["chmod", "+x", "/home/agent/task/timer.sh"], 30)
+        if deadline is not None:
+            # Upstream's timer script prints the remaining budget in hours and minutes.
+            await checked_exec(env, [
+                "bash", f"{UPSTREAM_ROOT}/src/utils/create_timer.sh", num_hours_text(seconds), "/home/agent/task/timer.sh",
+            ], 30)
+        else:
+            await env.write_file(
+                "/home/agent/task/timer.sh",
+                '#!/bin/sh\necho "No wall-clock limit; use the token-budget reminders."\n',
+            )
+            await checked_exec(env, ["chmod", "+x", "/home/agent/task/timer.sh"], 30)
         return state
 
     return solve
 
 
 async def restart_for_scoring(state, include_transcript: bool):
-    """Restore the submitted filesystem into a new H100 sandbox and overwrite evaluator inputs from the host."""
+    """Restore the submitted filesystem into a new H100 sandbox and reinstall trusted evaluator inputs from the host."""
     env = await gpu_environment().restart(state.metadata["gpu_config"])
     try:
         state.metadata["scoring_sandbox_id"] = env.resource_id
@@ -310,28 +280,10 @@ async def restart_for_scoring(state, include_transcript: bool):
                 }
             )
         )
-        # Restore the evaluator and held-out inputs from the host.
-        await env.upload(str(folder / "evaluator.tar.gz"), f"{REMOTE}/evaluator.tar.gz")
-        await checked_exec(
-            env,
-            ["tar", "xzf", f"{REMOTE}/evaluator.tar.gz", "-C", "/opt/inferencebench"],
-            60,
-        )
-        await checked_exec(
-            env,
-            [
-                "cp",
-                "/opt/inferencebench/src/eval/inference/bin/launch_supervised_server.sh",
-                "/opt/inference_eval/bin/launch_supervised_server.sh",
-            ],
-            30,
-        )
-        await env.write_file(
-            f"{REMOTE}/runtime.py", (ASSETS / "scripts" / "runtime.py").read_text()
-        )
-        await env.write_file(f"{REMOTE}/options.json", json.dumps(state.metadata))
-        for name in ["quality.json", "heldout-requests.jsonl", "quality-samples.jsonl"]:
-            await env.write_file(f"{REMOTE}/{name}", (folder / name).read_text())
+        # Replace whatever the agent left under the evaluator paths with the pristine upstream copy and measurements.
+        await install_upstream(env, state.metadata)
+        await env.write_file(f"{REMOTE}/trusted.tar.gz", archive_bytes(folder / "trusted", "trusted"))
+        await checked_exec(env, ["tar", "-xzf", f"{REMOTE}/trusted.tar.gz", "-C", REMOTE], 60)
         # Remove stale harness exports even when transcript review is disabled.
         await checked_exec(
             env,

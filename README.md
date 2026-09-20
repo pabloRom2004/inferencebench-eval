@@ -37,20 +37,17 @@ uv run inspect eval \
   --log-dir logs
 ```
 
-Or a provider CLI (claude_code, codex_cli, gemini_cli, kimi_code, opencode):
-
-Use [default.yaml](src/inferencebench/run_configs/default.yaml) and replace its solver:
+Or a provider CLI on the same maintained workload. [claude_code.yaml](src/inferencebench/run_configs/claude_code.yaml) and [codex_cli.yaml](src/inferencebench/run_configs/codex_cli.yaml) differ from `default.yaml` only in their `solver` block:
 
 ```bash
 uv run inspect eval \
-  --run-config src/inferencebench/run_configs/default.yaml \
+  --run-config src/inferencebench/run_configs/claude_code.yaml \
   --model provider/model \
-  --solver inferencebench/cli_agent \
-  -S harness=claude_code \
-  -S 'harness_args={"version":"2.1.114","permission_mode":"bypassPermissions","retry_refusals":0}' \
   -T scenarios=A -T 'seed_pairs=[[21,1337]]' \
   --log-dir logs
 ```
+
+Other Inspect SWE CLIs (gemini_cli, kimi_code, opencode) use the same `inferencebench/cli_agent` solver with `-S harness=opencode` and an explicit `-S 'harness_args={"version":"1.18.31"}'`.
 
 Or the original configuration:
 
@@ -74,7 +71,11 @@ View results with `uv run inspect view --log-dir logs`.
 
 Edit or copy one of the configs below and pass its path to `--run-config`. Override task arguments with `-T`, harness arguments with `-S`, and generation/evaluation settings with CLI flags, e.g. `--token-limit 5000000 --epochs 1`. Use `uv run inspect eval --help` for all options.
 
-To change benchmark prompt wording, edit the named `Prompt` objects in [prompts.py](src/inferencebench/prompts.py). Provider setup and request-cache preparation are in the [implementation guide](docs/implementation.md). The [fidelity review](docs/fidelity.md) traces the task, subject, judge, and differences from the paper.
+To change benchmark prompt wording, edit the named `Prompt` objects in [prompts.py](src/inferencebench/prompts.py). Provider setup is in the [implementation guide](docs/implementation.md). The [fidelity review](docs/fidelity.md) traces the task, subject, judge, and differences from the paper.
+
+## Upstream code
+
+The authors' repository is vendored byte-for-byte at [src/inferencebench/upstream](src/inferencebench/upstream), pinned by [upstream.lock](src/inferencebench/upstream.lock) (commit and git tree hash, which a test recomputes). Every sample installs that copy into its sandbox and applies the patches in [src/inferencebench/patches](src/inferencebench/patches); each stage then runs upstream's own entrypoints: `cache_samples`, `precompute_baseline`, `precompute_quality_baseline`, the task `evaluate.py`, `create_timer.sh`, and `get_judge_prompt.py`. The Python modules here are the wrapper: sandboxes, model routing, budgets, artifact capture, and the Inspect scorer. To move to another upstream commit, clone it, copy the tree over `upstream/`, update the lock's commit and tree hash (`git rev-parse <commit>^{tree}`), and re-check the patches with `git apply --check`.
 
 ## Parameters
 
@@ -85,6 +86,7 @@ Harness parameters live in `solver.args`. Shared settings are listed last.
 Config: [default.yaml](src/inferencebench/run_configs/default.yaml) (recommended).
 
 - `tools`: `[bash, python, web_search]`.
+- `tool_timeout`: seconds allowed per shell or Python call; `7200`. Model API timeouts do not bound tool execution.
 - `compaction_threshold`: context fraction triggering compaction; `0.75`.
 - `token_budget_reminder`: show token usage; `true`.
 - `nudge_prompt`: continue after normal completions; `true`.
@@ -92,13 +94,14 @@ Config: [default.yaml](src/inferencebench/run_configs/default.yaml) (recommended
 
 ### CLI
 
-Config: [default.yaml](src/inferencebench/run_configs/default.yaml), with `solver.solver: inferencebench/cli_agent`.
+Configs: [claude_code.yaml](src/inferencebench/run_configs/claude_code.yaml) and [codex_cli.yaml](src/inferencebench/run_configs/codex_cli.yaml), both `solver.solver: inferencebench/cli_agent`.
 
-- `harness`: native Inspect SWE factory, such as `claude_code`.
-- `harness_args`: native options, including `version`.
+- `harness`: native Inspect SWE factory; `claude_code` or `codex_cli`.
+- `harness_args`: native options. Claude Code pins `version: 2.1.267` with `permission_mode: bypassPermissions`, `retry_refusals: 0`, and upstream's `BASH_MAX_TIMEOUT_MS`; Codex pins `version: 0.154.0` with `web_search: disabled`, because its native search runs on OpenAI's side and cannot follow the bridge.
+- `cli_poll_timeout`: seconds a remote-process poll may wait; `7200`. Native adapters otherwise leave this unset.
 - `nudge_prompt`, `token_budget_reminder`, `web_search_args`: same defaults as ReAct.
 
-The adapter supplies the task directory, root sandbox user, bridged search, and served-model context limits. Native multi-attempt scoring is disabled because final grading restarts the server. Direct `--solver inspect_swe/...` overrides remain supported but omit these shared policies.
+The adapter supplies the task directory, root sandbox user, bridged search, and served-model context and output limits; OpenCode also gets native compaction settings and provider timers matching Inspect's attempt timeout, and the pinned Codex release archive is staged from its published digest so concurrent samples do not hit GitHub's API limits. Native multi-attempt scoring is disabled because final grading restarts the server. Direct `--solver inspect_swe/...` overrides remain supported but omit these shared policies.
 
 ### Original
 
@@ -123,7 +126,8 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `strict_prompt`: insert the leaderboard's strict rules (no third-party pre-quantized checkpoints, no modifying the evaluation harness) after the base-model constraint; `true`. The paper's Table 2 used the plain prompt; the site's dagger-marked rows used a strict prompt whose text is unreleased, so the wording is the port's.
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
 - `quality_samples`, `quality_seed`: `500`, `248`.
-- `quality_reference_backend`: server measuring the MMLU-Pro reference; `vllm` (pinned 0.19.0, minutes), original `transformers` (about an hour).
+- `quality_reference_backend`: server measuring the MMLU-Pro reference; `vllm` (pinned 0.19.0, minutes), original `transformers` (about an hour). Upstream's precompute runs the Transformers reference at concurrency 1 and other backends at `quality_concurrency`; the port does the same.
+- `quality_baseline_max_attempts`: `2` retries a failed reference request once on its own and requires a complete reference; `1` accepts upstream's registry exactly as its precompute wrote it.
 - `quality_tau`: required fraction of reference accuracy; `0.95`.
 
 Generation (`generate_config`):
@@ -147,9 +151,9 @@ The separate integrity judge uses GPT-6 Astra by default and Claude Sonnet 4.6 i
 
 ## Dataset
 
-Four [scenarios](src/inferencebench/assets/datasets/scenarios.json), with one seed pair by default and three in the original configuration. The default selects A; all scenarios give four or twelve samples respectively. Original request counts are A: 128, B: 64, C: 256 per profile, D: 96.
+Four scenarios, read from the vendored [task directories](src/inferencebench/upstream/src/eval/tasks), with one seed pair by default and three in the original configuration. The default selects A; all scenarios give four or twelve samples respectively. Original request counts are A: 128, B: 64, C: 256 per profile, D: 96.
 
-[Assets](src/inferencebench/assets) contain prompts, scenario definitions, scripts, and licenses. The LongBench-v2 prompts and the MMLU-Pro reference are prepared inside every attempt; a reference measurement on 2026-09-10 recorded 151/500 correct.
+[Assets](src/inferencebench/assets) contain the maintained token-budget prompt, scripts, and licenses; the original prompt and judge rubric are read from the vendored upstream copy. The LongBench-v2 prompts and the MMLU-Pro reference are prepared inside every attempt with upstream's sampler; a reference measurement on 2026-09-10 recorded 151/500 correct.
 
 ## Scoring
 
@@ -160,6 +164,15 @@ The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring re
 Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailable integrity judgments remain unscored; infrastructure failures remain Inspect errors. Report incomplete runs with their completed, scored, and unscored attempt counts.
 
 ## Changelog
+
+### [15] - 2026-09-21
+
+- Vendor the pinned upstream repository byte-for-byte under `src/inferencebench/upstream/` with `upstream.lock` (commit and git tree hash, checked by a test) and move the sampler's one-token truncation repair into `patches/`; every sample installs that copy and applies the patches inside its sandbox, and the shared speed baseline is keyed by the upstream commit and patch digest.
+- Drive each stage through upstream's own entrypoints instead of its private functions: `cache_samples`, `precompute_baseline` (with upstream's torch settings, a 900-second request timeout and sequential requests), `precompute_quality_baseline` (concurrency 1 for the Transformers reference, `quality_concurrency` for vLLM), the task's `evaluate.py` with upstream's three-plus-two retry schedule, `create_timer.sh`, and `get_judge_prompt.py` for the judge's rubric and pre-loaded evidence.
+- Install the agent workspace as upstream's harness does: the unchanged launcher template, upstream's `evaluate.py` stub over the `/opt/inference_eval` bundle, the `/opt/inference_eval/baselines` caches and registries, and the original container environment (`INFERENCE_BENCH_*`, `HOST`, `PORT`, `NUM_HOURS`) for login shells and CLI processes; the development evaluator samples its requests from the cached pool on the fly, as upstream's does.
+- Render the prompt exactly as upstream's `get_prompt.py` (integer hours, `metrics_preview.json`, no trailing newline), verified by a test that runs the script.
+- `quality_baseline_max_attempts: 1` now accepts upstream's registry as measured; `2` keeps the isolated retry and completeness requirement.
+- Add `claude_code.yaml` and `codex_cli.yaml` with the verified Inspect SWE settings, `cli_poll_timeout`, OpenCode native compaction and provider timers, staged Codex release archives, and a ReAct `tool_timeout`.
 
 ### [14] - 2026-09-17
 

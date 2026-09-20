@@ -1,0 +1,7 @@
+{
+  "source": "https://github.com/aisa-group/InferenceBench",
+  "commit": "24cdf88f6a4e14ed85d665aa132cecccb3ee95ef",
+  "tree": "0c1d5d06603b52b9c78a8de2fc5788f1dc2943f4",
+  "retrieved": "2026-09-20",
+  "note": "Byte-identical copy of the upstream commit; a test recomputes the git tree hash. Changes live in patches/."
+}

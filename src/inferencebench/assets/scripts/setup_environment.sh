@@ -14,11 +14,8 @@ uv pip install --system \
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
 
-# Pin the evaluator source and cache the target model.
-git clone https://github.com/aisa-group/InferenceBench.git /opt/inferencebench
-(cd /opt/inferencebench && git checkout 24cdf88f6a4e14ed85d665aa132cecccb3ee95ef)
-mkdir -p /home/agent/task /opt/inference_eval
-cp -r /opt/inferencebench/src/eval/inference/bin /opt/inference_eval/bin
+# The pinned evaluator source is installed from this package at sample start; cache the target model here.
+mkdir -p /home/agent/task
 python3 -c "from huggingface_hub import snapshot_download; snapshot_download('mistralai/Mistral-7B-Instruct-v0.3', ignore_patterns=['*.pt', '*.bin', 'original/*'])"
 
 # Isolate evaluator dependencies from agent-installed serving engines.

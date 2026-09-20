@@ -1,6 +1,10 @@
+import asyncio
 import importlib
 import json
 import math
+import os
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -24,18 +28,20 @@ from inferencebench.prompts import (
     JUDGE_ADAPTER_ORIGINAL,
     JUDGE_SHELL,
     JUDGE_TRANSCRIPT,
+    Prompt,
     select_prompt,
 )
 from inferencebench.run_config import load_config
+from inferencebench.vendored import UPSTREAM
 
 DEFAULT_SCORER_ARGS = load_config()["task"]["args"]["scorer"]["args"]
 
-# The original judge receives these two files inline, in this order, with long logs cut to their tail.
+# Upstream's judge prompt builder inlines these two files from the task directory, in this order.
 EVIDENCE_FILES = [
     ("start_server.sh", "/home/agent/task/start_server.sh"),
     ("server.log", f"{REMOTE}/final-server.log"),
 ]
-MAX_EVIDENCE_LINES = 200
+JUDGE_PROMPT_SCRIPT = UPSTREAM / "src/disallowed_usage_judge/get_judge_prompt.py"
 
 
 def scorers_from_spec(spec: dict[str, Any]) -> list[Scorer]:
@@ -65,31 +71,41 @@ def parse_judgment(text: str) -> bool | None:
     )
 
 
-async def preloaded_evidence(env) -> tuple[str, list[str]]:
-    """Reproduce the original judge's inline evidence block from the restarted submission."""
-    sections, names = [], []
+async def stage_evidence(env, folder: Path) -> list[str]:
+    """Copy the restarted submission's launcher and final server log where upstream's prompt builder expects them."""
+    evidence = folder / "judge-evidence"
+    evidence.mkdir(exist_ok=True)
+    names = []
     for filename, path in EVIDENCE_FILES:
         try:
             content = await env.read_file(path)
         except Exception:
             # Upstream silently skips unreadable evidence files.
             continue
-        lines = content.splitlines()
-        if len(lines) > MAX_EVIDENCE_LINES:
-            content = (
-                f"[...truncated {len(lines) - MAX_EVIDENCE_LINES} lines...]\n"
-                + "\n".join(lines[-MAX_EVIDENCE_LINES:])
-            )
-        sections.append(f"\n## Contents of `{filename}`\n```\n{content}\n```")
+        (evidence / filename).write_text(content)
         names.append(filename)
-    if not sections:
-        return "", names
-    return (
-        "\n\n# Pre-loaded File Evidence\n"
-        "The following files were found in the task directory. "
-        "Use them as primary evidence for your judgement.\n"
-        + "".join(sections)
-    ), names
+    return names
+
+
+async def upstream_judge_prompt(rubric: Prompt, benchmark: str, model: str, task_dir: Path) -> str:
+    """Render the rubric and pre-loaded evidence with upstream's own get_judge_prompt.py."""
+    env = {key: value for key, value in os.environ.items() if key not in {"INFERENCE_BENCH_PROMPT", "POST_TRAIN_BENCH_PROMPT"}}
+    with tempfile.TemporaryDirectory() as staging:
+        cwd = UPSTREAM
+        if rubric.prompt != (UPSTREAM / "src/disallowed_usage_judge/prompt.txt").read_text():
+            # The script reads its rubric from a fixed relative path; an alternate rubric is staged there.
+            cwd = Path(staging)
+            (cwd / "src/disallowed_usage_judge").mkdir(parents=True)
+            (cwd / "src/disallowed_usage_judge/prompt.txt").write_text(rubric.prompt)
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, str(JUDGE_PROMPT_SCRIPT), "--benchmark", benchmark, "--model", model, "--task-dir", str(task_dir),
+            cwd=cwd, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+    if process.returncode != 0:
+        raise RuntimeError(f"Upstream judge prompt builder failed: {stderr.decode()}")
+    # Upstream captures the script's output with command substitution, which drops trailing newlines.
+    return stdout.decode().rstrip("\n")
 
 
 async def judge_submission(
@@ -160,15 +176,16 @@ async def judge_submission(
 
         return execute
 
-    prompt = (
-        select_prompt(judge_prompt, "judge_prompt")
-        .prompt.replace("{model}", state.metadata["base_model"])
-        .replace("{benchmark}", SCENARIOS[state.metadata["scenario"]]["benchmark"])
+    folder = Path(store().get("artifacts"))
+    evidence_names = await stage_evidence(env, folder) if preload_evidence else []
+    evidence = folder / "judge-evidence" if preload_evidence else folder / "judge-no-evidence"
+    evidence.mkdir(exist_ok=True)
+    prompt = await upstream_judge_prompt(
+        select_prompt(judge_prompt, "judge_prompt"),
+        SCENARIOS[state.metadata["scenario"]]["benchmark"],
+        state.metadata["base_model"],
+        evidence,
     )
-    evidence_names: list[str] = []
-    if preload_evidence:
-        evidence, evidence_names = await preloaded_evidence(env)
-        prompt += evidence
     adapter = JUDGE_ADAPTER_ORIGINAL if preload_evidence else JUDGE_ADAPTER
     prompt += "\n\n" + adapter.prompt.format(remote=REMOTE)
     if judge_shell:
@@ -240,7 +257,7 @@ def inference_speedup(
     async def score(state, target):
         """Retain raw final measurements and distinguish invalid submissions from unavailable judgments."""
         folder = Path(store().get("artifacts"))
-        baseline = json.loads((folder / "baseline.json").read_text())
+        baseline = json.loads((folder / "trusted" / "speed" / "baseline_metrics.json").read_text())["baseline"]
         baseline_performance = performance(baseline, state.metadata["scenario"])
         env = await restart_for_scoring(state, include_transcript)
         try:

@@ -35,8 +35,9 @@ inferencebench = [
     "assets/prompts/*.txt",
     "assets/scripts/*.py",
     "assets/scripts/*.sh",
-    "assets/datasets/*.json",
     "compose.yaml", "runpod.yaml", "Dockerfile", "eval.yaml",
+    "upstream.lock", "patches/*.patch",
+    "upstream/**/*", "upstream/.gitignore", "upstream/containers/other_home_data/.codex/*",
 ]
 
 [dependency-groups]
@@ -46,6 +47,10 @@ dev = ["pytest", "pytest-asyncio", "ruff", "build"]
 addopts = "--import-mode=importlib"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff]
+# The vendored upstream copy stays byte-identical to its commit.
+extend-exclude = ["src/inferencebench/upstream"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]

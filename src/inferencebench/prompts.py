@@ -1,9 +1,12 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from inferencebench.vendored import UPSTREAM as UPSTREAM_TREE
+from inferencebench.vendored import upstream_lock
+
 ASSETS = Path(__file__).parent / "assets"
-UPSTREAM_COMMIT = "24cdf88f6a4e14ed85d665aa132cecccb3ee95ef"
-UPSTREAM = f"https://github.com/aisa-group/InferenceBench/blob/{UPSTREAM_COMMIT}"
+UPSTREAM_COMMIT = upstream_lock()["commit"]
+UPSTREAM = f"{upstream_lock()['source']}/blob/{UPSTREAM_COMMIT}"
 
 
 @dataclass(frozen=True)
@@ -35,10 +38,10 @@ PROMPTS = {
     ),
     "original": Prompt(
         title="original",
-        prompt=(ASSETS / "prompts" / "original_prompt.txt").read_text(),
+        prompt=(UPSTREAM_TREE / "src/eval/general/prompt.txt").read_text(),
         role="subject",
         origin=f"{UPSTREAM}/src/eval/general/prompt.txt",
-        origin_note="Verbatim upstream template; replace only the upstream placeholders.",
+        origin_note="Read from the vendored upstream copy; only the upstream placeholders are replaced.",
         inspect_parameter="system_prompt",
         affordances={
             "tools": "Root shell, coding CLI, Internet, and the H100 server workspace."
@@ -47,10 +50,10 @@ PROMPTS = {
     ),
     "original_judge": Prompt(
         title="original_judge",
-        prompt=(ASSETS / "prompts" / "original_judge.txt").read_text(),
+        prompt=(UPSTREAM_TREE / "src/disallowed_usage_judge/prompt.txt").read_text(),
         role="judge",
         origin=f"{UPSTREAM}/src/disallowed_usage_judge/prompt.txt",
-        origin_note="Verbatim rubric; the Inspect adapter returns the two verdict lines in its final answer.",
+        origin_note="Read from the vendored upstream copy and rendered by upstream's own get_judge_prompt.py; the Inspect adapter returns the two verdict lines in its final answer.",
         inspect_parameter="judge_prompt",
         affordances={
             "inspect_submission": "Read source and launch logs, with optional agent transcript access."

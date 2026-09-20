@@ -443,55 +443,21 @@ from pathlib import Path
 folder = Path('/tmp/inferencebench')
 operation = sys.argv[2]
 metrics = {'profiles': {'burst': {'success_count': 1, 'ttft': {'p50': 2 if operation == 'prepare' else 1}}}, 'quality_check': {'pass': True}}
+if operation == 'install':
+    sys.exit(0)
 if operation == 'prepare':
     options = json.loads((folder / 'options.json').read_text())
     rows = [{'messages': [{'role': 'user', 'content': 'synthetic request'}], 'ignore_eos': True,
              'target_input_token_count': 7000, 'max_new_tokens': 1003}] * options['request_limit']
-    for path in [folder / 'heldout-requests.jsonl', Path('/home/agent/task/requests.jsonl')]:
-        path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
-    import importlib.util
-    spec = importlib.util.spec_from_file_location('runtime', folder / 'runtime.py')
-    runtime = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(runtime)
-    runtime.install_workspace(options)
-    from dataclasses import dataclass
-    from types import SimpleNamespace
-    import inference
-
-    @dataclass
-    class QualitySpec:
-        """Represent the upstream quality input contract in the CPU fixture."""
-        samples_file: Path
-        seed: int
-        limit: int
-
-    def reference(selection, url, model, timeout, concurrency, out):
-        """Force one initial timeout and require an isolated retry of that exact saved input."""
-        samples = [json.loads(line) for line in selection.samples_file.read_text().splitlines()]
-        retry = selection.limit == 1
-        assert timeout == options['request_timeout_seconds']
-        assert concurrency == (1 if retry else options['quality_concurrency'])
-        if retry:
-            assert samples == [{'sample_id': '0', 'max_new_tokens': 2048, 'temperature': 0}]
-        rows = [{'sample_id': item['sample_id'], 'request_index': index,
-                 'success': retry or index != 0, 'gold_answer': 'A',
-                 'parsed_answer': 'A' if retry or index != 0 else None}
-                for index, item in enumerate(samples)]
-        path = out / 'baseline_generations.jsonl'
-        path.write_text(''.join(json.dumps(row) + '\\n' for row in rows))
-        return sum(row['success'] for row in rows) / len(rows), path, None
-
-    def accuracy(rows):
-        """Calculate a known reference accuracy after the failed request recovers."""
-        return sum(row['parsed_answer'] == row['gold_answer'] for row in rows) / len(rows)
-
-    samples_file = folder / 'quality-samples.jsonl'
-    samples_file.write_text(''.join(json.dumps({'sample_id': str(index), 'max_new_tokens': 2048, 'temperature': 0}) + '\\n' for index in range(options['quality_samples'])))
-    inference.precompute_quality_baseline = SimpleNamespace(_run_dataset=reference, _accuracy=accuracy)
-    runtime.prepare_quality_baseline(options, QualitySpec(samples_file, options['quality_seed'], options['quality_samples']))
-    assert (folder / 'quality-baseline/attempt-2/0/baseline_generations.jsonl').exists()
-    (folder / 'baseline.json').write_text(json.dumps(metrics))
-    (folder / 'provenance.json').write_text(json.dumps({'downloaded_model_revision': 'cpu-fixture', 'input_sha256': {}}))
+    trusted = folder / 'trusted'
+    (trusted / 'speed').mkdir(parents=True, exist_ok=True)
+    (trusted / 'quality').mkdir(exist_ok=True)
+    (trusted / 'speed/requests.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in rows))
+    (trusted / 'speed/baseline_metrics.json').write_text(json.dumps({'baseline': metrics}))
+    (trusted / 'quality/samples.jsonl').write_text('{}\n')
+    (trusted / 'provenance.json').write_text(json.dumps({'downloaded_model_revision': 'cpu-fixture', 'input_sha256': {}}))
+    (trusted / 'environment.json').write_text(json.dumps({'INFERENCE_BENCH_BASE_MODEL': options['base_model']}))
+    Path('/home/agent/task/start_server.sh').touch()
 else:
     if os.environ['TEST_DISK_MODE'] == 'reset':
         assert Path('/etc/nvidia/nvidia-application-profiles-rc.d/10-container.conf').read_text() == 'provider-owned driver profile'
