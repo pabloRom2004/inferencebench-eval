@@ -42,19 +42,23 @@ task:
         judge_shell: true
 
 solver:
-  # Maintained ReAct harness; claude_code.yaml and codex_cli.yaml select the native CLIs through cli_agent.
-  solver: inferencebench/react_agent
+  # Claude Code through Inspect SWE; the served model, tools, and budgets stay with Inspect.
+  solver: inferencebench/cli_agent
   args:
-    tools: [bash, python, web_search]
+    harness: claude_code
+    harness_args:
+      version: 2.1.267
+      permission_mode: bypassPermissions
+      retry_refusals: 0
+      env:
+        # Upstream's agent launcher allows ten-hour shell commands, long enough for full evaluations.
+        BASH_MAX_TIMEOUT_MS: "36000000"
     web_search_args:
       backend: duckduckgo
       max_results: 10
       timeout: 5
-    # Shell and Python calls end after two hours; model API timeouts do not bound tool execution.
-    tool_timeout: 7200
-    compaction_threshold: 0.75
-    # Submission and early-answer stopping are disabled by default.
-    submit: false
+    # Remote-process polls for the CLI may wait this long; native adapters otherwise omit the timeout.
+    cli_poll_timeout: 7200
     nudge_prompt: true
     token_budget_reminder: true
 

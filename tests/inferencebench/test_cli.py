@@ -68,7 +68,8 @@ def test_cli_continuation_and_scoring(local_task, monkeypatch, harness, continue
     )
     task, env = local_task
     env.write_file = AsyncMock()
-    monkeypatch.setattr(CLI, "sandbox", lambda: env)
+    env.exec_remote = AsyncMock()
+    monkeypatch.setattr(CLI, "sandbox", lambda name=None: env)
     task.dataset[0].metadata["agent_seconds"] = None
     task.solver = as_solver(cli_agent(harness, nudge_prompt=continue_work))
     outputs = [ModelOutput.from_content("mockllm/subject", "Ready") for _ in range(5)]

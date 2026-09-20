@@ -17,15 +17,19 @@ DEFAULT_AGENT_ARGS = load_config()["solver"]["args"]
 def react_agent(
     tools: list[str] = DEFAULT_AGENT_ARGS["tools"],
     web_search_args: dict = DEFAULT_AGENT_ARGS["web_search_args"],
+    tool_timeout: int | None = DEFAULT_AGENT_ARGS["tool_timeout"],
     compaction_threshold: float = DEFAULT_AGENT_ARGS["compaction_threshold"],
     submit: bool = DEFAULT_AGENT_ARGS["submit"],
     nudge_prompt: bool = DEFAULT_AGENT_ARGS["nudge_prompt"],
     token_budget_reminder: bool = DEFAULT_AGENT_ARGS["token_budget_reminder"],
 ) -> Solver:
     """Run ReAct with optional submission, continuation nudges, and live token-budget reminders."""
+    if tool_timeout is not None and (type(tool_timeout) is not int or tool_timeout <= 0):
+        raise ValueError("tool_timeout must be a positive integer or null")
+    # Model API timeouts do not bound tool execution; the shell and Python tools get their own limit.
     available = {
-        "bash": bash,
-        "python": python,
+        "bash": partial(bash, timeout=tool_timeout),
+        "python": partial(python, timeout=tool_timeout),
         "web_search": partial(web_search, **web_search_args),
     }
 
