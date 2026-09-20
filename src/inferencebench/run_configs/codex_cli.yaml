@@ -33,13 +33,13 @@ task:
       args:
         grader_role: integrity
         judge_prompt: original_judge
+        # Re-run the judge when its verdict files are missing or malformed.
         max_grader_attempts: 3
         include_transcript: true
         # One prompt line points the judge at the exported transcript.
         transcript_hint: true
-        # Released-judge evidence: inline launcher and server-log tail, plus shell access.
-        preload_evidence: true
-        judge_shell: true
+        # Claude Code, run in the submission directory like upstream's judge; the port's tested pin.
+        judge_cli_version: 2.1.114
 
 solver:
   # Codex CLI through Inspect SWE; the served model, tools, and budgets stay with Inspect.
@@ -71,7 +71,7 @@ model_roles:
   integrity:
     model: openrouter/openai/gpt-6-astra
     args:
-      # The read-only inspection tool has optional pagination arguments.
+      # Claude Code's bridged tool schemas have optional parameters.
       strict_tools: false
     config:
       temperature: null

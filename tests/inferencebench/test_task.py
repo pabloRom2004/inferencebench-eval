@@ -29,6 +29,55 @@ HARNESS = importlib.import_module("inferencebench.harness_original")
 TOOLS = importlib.import_module("inferencebench.tools")
 
 
+JUDGE_FILES: dict[str, str] = {}
+JUDGE_CALLS: list[dict] = []
+
+
+@pytest.fixture(autouse=True)
+def fake_judge_cli(monkeypatch):
+    """Replace Claude Code with a stub that asks the judge model once and writes its verdict lines as upstream's files."""
+    from inspect_ai.agent import agent
+    from inspect_ai.util import sandbox
+
+    JUDGE_FILES.clear()
+    JUDGE_CALLS.clear()
+
+    def claude_code(**kwargs):
+        """Record the native arguments and return the stub agent."""
+        JUDGE_CALLS.append(kwargs)
+
+        @agent
+        def stub():
+            """Stand in for Claude Code writing contamination_judgement.txt and disallowed_model_judgement.txt."""
+
+            async def execute(state):
+                """Generate once with the judge model and file each verdict line the way the CLI judge does."""
+                output = await kwargs["model"].generate(state.messages)
+                lines = [line.replace("**", "").replace("`", "").strip() for line in output.completion.splitlines() if line.strip()]
+                for name, line in zip(SCORERS.VERDICT_FILES, lines):
+                    path = f"{kwargs['cwd']}/{name}"
+                    text = line.removeprefix(name + ":").strip() + "\n"
+                    try:
+                        await sandbox(kwargs["sandbox"]).write_file(path, text)
+                    except Exception:
+                        JUDGE_FILES[path] = text
+                state.messages = [*state.messages, output.message]
+                return state
+
+            return execute
+
+        return stub()
+
+    monkeypatch.setattr(SCORERS, "judge_cli", claude_code)
+
+
+def verdict_file(path):
+    """Return a verdict file the fake judge wrote, raising like a sandbox read for anything else."""
+    if path not in JUDGE_FILES:
+        raise FileNotFoundError(path)
+    return JUDGE_FILES[path]
+
+
 @pytest.fixture(autouse=True)
 def remove_mock_logs():
     """Keep temporary mock logs in the flat logs directory and remove only logs created by this test."""
@@ -82,12 +131,14 @@ def local_task(monkeypatch, tmp_path):
         return solve
 
     async def read_file(path):
-        """Return only the freshly generated final server outputs expected by the scorer."""
-        return (
-            json.dumps(measurements(2))
-            if path.endswith("final.json")
-            else "Mistral server log"
-        )
+        """Return the fresh final server outputs, the fake judge's verdict files, and launcher or log evidence."""
+        if path.endswith("final.json"):
+            return json.dumps(measurements(2))
+        if path in JUDGE_FILES:
+            return JUDGE_FILES[path]
+        if path.endswith("_judgement.txt"):
+            raise FileNotFoundError(path)
+        return "Mistral server log"
 
     env = SimpleNamespace(
         exec=AsyncMock(
@@ -172,6 +223,7 @@ def test_config_dataset_and_provenance():
     assert original["task"]["args"]["scorer"]["args"] == {
         **config["task"]["args"]["scorer"]["args"],
         "transcript_hint": False,
+        "max_grader_attempts": 1,
     }
     assert original["solver"]["args"]["version"] == "2.1.114"
 
@@ -626,7 +678,7 @@ def test_prompt_selection_contract():
         )
     assert PROMPTS["original"].role == "subject"
     assert PROMPTS["original_judge"].role == "judge"
-    assert PROMPTS["inspect_judge_adapter"].output_format
+    assert PROMPTS["original_judge"].output_format
 
 
 async def test_modal_filesystem_adapter():
@@ -676,7 +728,9 @@ def test_invalid_submissions_receive_baseline(local_task, tmp_path, failure):
 
     async def read_file(path):
         """Expose the selected submission failure through the actual scorer transport boundary."""
-        return json.dumps(metrics) if path.endswith("final.json") else "server log"
+        if path.endswith("final.json"):
+            return json.dumps(metrics)
+        return verdict_file(path) if path.endswith("_judgement.txt") else "server log"
 
     env.read_file = read_file
     [log] = inspect_eval(
@@ -857,73 +911,16 @@ def test_bound_judge_configuration(local_task, tmp_path):
         "role": "integrity",
         "attempts": 1,
         "include_transcript": True,
-        "preloaded_evidence": ["start_server.sh", "server.log"],
-        "judge_shell": True,
         "transcript_hint": True,
+        "preloaded_evidence": ["start_server.sh", "server.log"],
+        "judge_cli_version": "2.1.114",
+        "verdict_files": {
+            "contamination_judgement.txt": "no contamination detected\n",
+            "disallowed_model_judgement.txt": "only allowed use detected\n",
+        },
     }
-
-
-@pytest.mark.parametrize("legacy_strict", [True, False])
-def test_openrouter_judge_optional_tool_schema(local_task, legacy_strict):
-    """Reproduce the strict-schema rejection through the real provider and exercise the configured repair."""
-    import httpx2
-    from inspect_ai.model import GenerateConfig
-
-    task, env = local_task
-    requests = []
-
-    def respond(request):
-        body = json.loads(request.content)
-        requests.append(body)
-        function = body["tools"][0]["function"]
-        assert function["name"] == "inspect_submission"
-        parameters = function["parameters"]
-        if function.get("strict") and set(parameters["required"]) != set(parameters["properties"]):
-            return httpx2.Response(400, json={"error": {
-                "message": "Invalid schema: required must include every key in properties; missing start_line",
-                "type": "invalid_request_error", "code": "invalid_function_parameters",
-            }})
-        message = (
-            {"role": "assistant", "content": None, "tool_calls": [{
-                "id": "read-launcher", "type": "function", "function": {
-                    "name": "inspect_submission",
-                    "arguments": json.dumps({"path": "/home/agent/task/start_server.sh"}),
-                },
-            }]}
-            if len(requests) == 1
-            else {"role": "assistant", "content": "no contamination detected\nonly allowed use detected"}
-        )
-        return httpx2.Response(200, json={
-            "id": "judge-schema-test", "object": "chat.completion", "created": 0,
-            "model": "openai/gpt-6-astra",
-            "choices": [{"index": 0, "message": message,
-                         "finish_reason": "tool_calls" if len(requests) == 1 else "stop"}],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        })
-
-    spec = load_config()["model_roles"]["integrity"]
-    args = {} if legacy_strict else spec["args"]
-    judge = get_model(
-        spec["model"], api_key="local-test-no-credential",
-        base_url="https://schema-test.invalid/v1",
-        config=GenerateConfig(**{**spec["config"], "max_retries": 0}),
-        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
-        **args,
-    )
-    [log] = inspect_eval(
-        task, solver=generate(), model="mockllm/subject",
-        model_roles={"integrity": judge}, display="none", log_dir="logs",
-    )
-    env.terminate.assert_awaited_once()
-    if legacy_strict:
-        assert log.status == "error"
-        assert "missing start_line" in log.samples[0].error.message
-        assert not log.samples[0].scores
-    else:
-        assert log.status == "success", log.error
-        assert len(requests) == 2
-        env.exec.assert_any_await(["sed", "-n", "1,200p", "--", "/home/agent/task/start_server.sh"], timeout=30)
-        assert log.samples[0].scores["inference_speedup"].value["speedup"] == 2
+    [call] = JUDGE_CALLS
+    assert str(call["model"]) == "mockllm/alternate" and call["version"] == "2.1.114"
 
 
 def test_plain_and_default_configuration(local_task, tmp_path):
@@ -1161,6 +1158,14 @@ def test_judge_transcript_toggle(
     env.resource_id = "local-scoring-sandbox"
     env.restart = AsyncMock(return_value=env)
     env.upload = AsyncMock(side_effect=upload)
+    fixture_read = env.read_file
+
+    async def read_file(path):
+        """Serve evidence from the mapped filesystem when present, otherwise the fixture's outputs."""
+        local = local_path(path)
+        return local.read_text() if local.is_file() else await fixture_read(path)
+
+    env.read_file = read_file
     async def download(remote, local):
         Path(local).write_bytes(local_path(remote).read_bytes())
     env.download = AsyncMock(side_effect=download)
@@ -1171,12 +1176,6 @@ def test_judge_transcript_toggle(
     judge = get_model(
         "mockllm/transcript-judge",
         custom_outputs=[
-            ModelOutput.for_tool_call(
-                "mockllm/transcript-judge", "inspect_submission", {"path": path}
-            )
-            for path in [launcher, transcript]
-        ]
-        + [
             ModelOutput.from_content(
                 "mockllm/transcript-judge",
                 "no contamination detected\nonly allowed use detected",
@@ -1229,18 +1228,7 @@ def test_judge_transcript_toggle(
         if event.event == "model" and event.model == "mockllm/transcript-judge"
     )
     assert ("agent-transcript.json" in initial.input[0].text) is hinted
-    if args["scorer"]["args"]["preload_evidence"]:
-        assert "## Contents of `start_server.sh`" in initial.input[0].text
-    else:
-        assert launcher in initial.input[0].text
-    reads = [
-        event
-        for event in sample.events
-        if event.event == "tool" and event.function == "inspect_submission"
-    ]
-    assert reads[0].result == "launcher evidence"
-    assert ("subject transcript evidence" in reads[1].result) is enabled
-    assert ("CLI tool result evidence" in reads[1].result) is enabled
+    assert "## Contents of `start_server.sh`\n```\nlauncher evidence\n```" in initial.input[0].text
     assert local_path(transcript).exists() is enabled
     if enabled:
         evidence = json.loads(local_path(transcript).read_text())
@@ -1250,7 +1238,6 @@ def test_judge_transcript_toggle(
         assert "subject transcript evidence" in json.dumps(evidence["events"])
         assert json.dumps(evidence["events"]).count("CLI tool result evidence") == 1
     else:
-        assert "No such file" in reads[1].result
         assert not any(
             call.args[0] == transcript for call in env.write_file.await_args_list
         )
@@ -1274,12 +1261,20 @@ def test_judge_transcript_toggle(
 
 
 @pytest.mark.parametrize("value", [None, "false", 0])
-@pytest.mark.parametrize("setting", ["include_transcript", "preload_evidence", "judge_shell", "transcript_hint"])
+@pytest.mark.parametrize("setting", ["include_transcript", "transcript_hint"])
 def test_invalid_judge_toggles(setting, value):
     """Reject ambiguous judge evidence settings before creating a scoring sandbox."""
     args = load_config()["task"]["args"]["scorer"]["args"]
     with pytest.raises(ValueError, match=f"{setting} must be a boolean"):
         SCORERS.inference_speedup(**{**args, setting: value})
+
+
+@pytest.mark.parametrize("version", ["auto", "latest", "", None])
+def test_judge_requires_exact_cli_version(version):
+    """Refuse mutable Claude Code tags for the judge so verdicts stay reproducible."""
+    args = load_config()["task"]["args"]["scorer"]["args"]
+    with pytest.raises(ValueError, match="exact Claude Code version"):
+        SCORERS.inference_speedup(**{**args, "judge_cli_version": version})
 
 
 def test_transcript_hint_requires_export():
@@ -1290,8 +1285,8 @@ def test_transcript_hint_requires_export():
 
 
 @pytest.mark.parametrize("missing_launcher", [False, True])
-def test_original_judge_evidence_and_shell(local_task, monkeypatch, missing_launcher):
-    """Give the original-config judge upstream's inline launcher and log tail plus shell access in the scoring sandbox."""
+def test_original_judge_runs_claude_code_with_upstream_prompt(local_task, monkeypatch, missing_launcher):
+    """Give the original-config judge upstream's rendered prompt inside Claude Code, started in the restarted submission like upstream."""
     from inspect_ai.model import ChatMessageUser
 
     _, env = local_task
@@ -1299,7 +1294,7 @@ def test_original_judge_evidence_and_shell(local_task, monkeypatch, missing_laun
     log_lines = [f"server line {index}" for index in range(1, 251)]
 
     async def read_file(path):
-        """Serve the restarted submission's launcher and a 250-line final server log."""
+        """Serve the restarted submission's launcher, a 250-line final server log, and the judge's verdict files."""
         if path.endswith("final.json"):
             return json.dumps(measurements(2))
         if path == launcher:
@@ -1308,19 +1303,16 @@ def test_original_judge_evidence_and_shell(local_task, monkeypatch, missing_laun
             return "launcher evidence"
         if path.endswith("final-server.log"):
             return "\n".join(log_lines)
-        return ""
+        return verdict_file(path)
 
     env.read_file = read_file
     args = load_config("run_configs/original.yaml")["task"]["args"]
-    assert args["scorer"]["args"] == {**args["scorer"]["args"], "preload_evidence": True, "judge_shell": True, "include_transcript": True, "transcript_hint": False}
+    assert args["scorer"]["args"] == {**args["scorer"]["args"], "max_grader_attempts": 1, "include_transcript": True, "transcript_hint": False, "judge_cli_version": "2.1.114"}
     task = inference_bench(**{**args, "scenarios": "A", "seed_pairs": [[21, 1337]], "agent_seconds": 2})
     task.sandbox = None
     judge = get_model(
         "mockllm/original-judge",
-        custom_outputs=[
-            ModelOutput.for_tool_call("mockllm/original-judge", "run_shell", {"command": "ls"}),
-            ModelOutput.from_content("mockllm/original-judge", "no contamination detected\nonly allowed use detected"),
-        ],
+        custom_outputs=[ModelOutput.from_content("mockllm/original-judge", "no contamination detected\nonly allowed use detected")],
     )
     [log] = inspect_eval(task, solver=generate(), model="mockllm/subject", model_roles={"integrity": judge}, display="none", log_dir="logs")
     assert log.status == "success", log.error
@@ -1328,19 +1320,21 @@ def test_original_judge_evidence_and_shell(local_task, monkeypatch, missing_laun
     initial = next(e for e in sample.events if e.event == "model" and e.model == "mockllm/original-judge")
     text = initial.input[0].text
     assert isinstance(initial.input[0], ChatMessageUser)
-    evidence = text.index("# Pre-loaded File Evidence")
-    assert evidence < text.index("Inspect adapter:") and "The following files were found in the task directory. Use them as primary evidence for your judgement." in text
-    assert "final-server.log" not in text and "relevant source" not in text
+    rubric = PROMPTS["original_judge"].prompt.replace("{model}", "mistralai/Mistral-7B-Instruct-v0.3").replace("{benchmark}", "InferenceBench Scenario A: Input heavy (prefill speed)")
+    assert text.startswith(rubric) and "Inspect adapter" not in text and "run_shell" not in text and "agent-transcript.json" not in text
+    assert "# Pre-loaded File Evidence\nThe following files were found in the task directory. Use them as primary evidence for your judgement." in text
     assert ("## Contents of `start_server.sh`\n```\nlauncher evidence\n```" in text) is not missing_launcher
     assert "## Contents of `server.log`\n```\n[...truncated 50 lines...]\nserver line 51\n" in text
     assert "server line 50\n" not in text and text.rstrip().count("server line 250") == 1
-    assert "run_shell tool executes commands from /home/agent/task" in text and "agent-transcript.json" not in text
-    shell = [e for e in sample.events if e.event == "tool" and e.function == "run_shell"]
-    assert len(shell) == 1 and shell[0].arguments == {"command": "ls"}
-    assert any(call.args[0] == ["bash", "-lc", "cd /home/agent/task && ls"] for call in env.exec.await_args_list)
+    [call] = JUDGE_CALLS
+    assert str(call["model"]) == "mockllm/original-judge" and call["version"] == "2.1.114" and call["cwd"] == "/home/agent/task"
+    assert call["user"] == "root" and call["sandbox"] == "default" and call["permission_mode"] == "bypassPermissions" and call["retry_refusals"] == 0
+    verdicts = [f"/home/agent/task/{name}" for name in SCORERS.VERDICT_FILES]
+    assert any(list(c.args[0]) == ["rm", "-f", *verdicts] for c in env.exec.await_args_list)
     details = sample.scores["inference_speedup"].metadata["integrity_judge"]
     assert details["preloaded_evidence"] == (["server.log"] if missing_launcher else ["start_server.sh", "server.log"])
-    assert details["judge_shell"] is True and details["include_transcript"] is True and details["transcript_hint"] is False
+    assert details["attempts"] == 1 and details["transcript_hint"] is False and sorted(details["verdict_files"]) == SCORERS.VERDICT_FILES
+    assert sample.scores["inference_speedup"].value == {"speedup": 2.0}
 
 
 @pytest.mark.parametrize("failure", ["solver", "connection"])
@@ -1858,8 +1852,10 @@ def host_environment(tmp_path, prepare_outcomes):
         return ExecResult(success=True, returncode=0, stdout="", stderr="")
 
     async def read_file(path):
-        """Serve the final measurement to the scorer."""
-        return json.dumps(measurements(2)) if path.endswith("final.json") else ""
+        """Serve the final measurement and the fake judge's verdicts to the scorer."""
+        if path.endswith("final.json"):
+            return json.dumps(measurements(2))
+        return verdict_file(path) if path.endswith("_judgement.txt") else ""
 
     async def write_file(path, content):
         """Capture the options handed to the sandbox runtime."""

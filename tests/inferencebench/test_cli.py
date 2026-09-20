@@ -19,6 +19,7 @@ from inspect_ai.model import (
 from inspect_ai.tool import ToolInfo
 
 from inferencebench.cli import CLI_HARNESSES, cli_agent
+from tests.inferencebench.test_task import fake_judge_cli as fake_judge_cli
 from tests.inferencebench.test_task import judge_model
 from tests.inferencebench.test_task import local_task as local_task
 from tests.inferencebench.test_task import remove_mock_logs as remove_mock_logs

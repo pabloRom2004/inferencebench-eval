@@ -32,12 +32,13 @@ task:
       args:
         grader_role: integrity
         judge_prompt: original_judge
-        max_grader_attempts: 3
-        # The transcript is exported but, as in the released harness, never mentioned.
+        # Upstream judges once; malformed or missing verdict files leave the sample unscored.
+        max_grader_attempts: 1
         include_transcript: true
+        # The transcript is exported but, as in the released harness, never mentioned.
         transcript_hint: false
-        preload_evidence: true
-        judge_shell: true
+        # Claude Code, run in the submission directory like upstream's judge; the port's tested pin.
+        judge_cli_version: 2.1.114
 
 solver:
   # Switch harness below, or use --solver inferencebench/original_agent -S harness=codex_cli -S version=auto.

@@ -30,6 +30,7 @@ from inspect_ai.util import (
 from inferencebench import cli_agent, inference_bench, react_agent
 from inferencebench.prompts import ASSETS
 from inferencebench.runpod_sandbox import RunPodSandbox
+from tests.inferencebench.test_task import fake_judge_cli as fake_judge_cli
 
 
 @pytest.fixture

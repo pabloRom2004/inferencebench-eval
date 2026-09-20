@@ -29,7 +29,7 @@ class InferenceSandbox(ModalSandboxEnvironment):
         await self.sandbox.terminate.aio(wait=True)
 
     async def restart(self, config_file: str | None) -> "InferenceSandbox":
-        """Preserve the submitted filesystem and allocate a fresh H100 without its running processes."""
+        """Preserve the submitted filesystem and allocate a fresh H100 without its running processes, keeping this registered object."""
         image = await self.sandbox.snapshot_filesystem.aio(timeout=55)
         await self.terminate()
         config = load_config(config_file or "compose.yaml")
@@ -48,7 +48,9 @@ class InferenceSandbox(ModalSandboxEnvironment):
             timeout=config["x-modal"]["timeout"],
             workdir=resources["working_dir"],
         )
-        return InferenceSandbox(remote)
+        # Inspect SWE resolves the sample's sandbox by name, so the judge must find the replacement here.
+        self.sandbox = remote
+        return self
 
     async def _absolute_file(self, file: str) -> str:
         """Resolve relative Inspect paths against the sandbox's configured working directory."""

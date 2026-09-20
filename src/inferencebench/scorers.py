@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import anyio
-from inspect_ai.agent import AgentState, react
+import inspect_swe
+from inspect_ai.agent import AgentState
 from inspect_ai.model import ChatMessageUser, GenerateConfig, get_model, model_roles
 from inspect_ai.scorer import Score, Scorer, scorer
-from inspect_ai.tool import Tool, tool
 from inspect_ai.util import store
 
 from inferencebench.dataset import SCENARIOS
@@ -23,14 +23,7 @@ from inferencebench.metrics import (
     scored_attempts,
     unscored_attempts,
 )
-from inferencebench.prompts import (
-    JUDGE_ADAPTER,
-    JUDGE_ADAPTER_ORIGINAL,
-    JUDGE_SHELL,
-    JUDGE_TRANSCRIPT,
-    Prompt,
-    select_prompt,
-)
+from inferencebench.prompts import JUDGE_TRANSCRIPT, Prompt, select_prompt
 from inferencebench.run_config import load_config
 from inferencebench.vendored import UPSTREAM
 
@@ -42,6 +35,10 @@ EVIDENCE_FILES = [
     ("server.log", f"{REMOTE}/final-server.log"),
 ]
 JUDGE_PROMPT_SCRIPT = UPSTREAM / "src/disallowed_usage_judge/get_judge_prompt.py"
+# Upstream's judge writes its two verdicts as files in the submission directory.
+VERDICT_FILES = ["contamination_judgement.txt", "disallowed_model_judgement.txt"]
+# The judge runs the same CLI upstream used; bound here so the judge can be replaced independently of the agent.
+judge_cli = inspect_swe.claude_code
 
 
 def scorers_from_spec(spec: dict[str, Any]) -> list[Scorer]:
@@ -115,81 +112,18 @@ async def judge_submission(
     judge_prompt: str,
     max_grader_attempts: int,
     include_transcript: bool,
-    preload_evidence: bool = False,
-    judge_shell: bool = False,
-    transcript_hint: bool = False,
+    transcript_hint: bool,
+    judge_cli_version: str,
 ) -> tuple[bool | None, str, dict[str, Any]]:
-    """Apply the upstream integrity rubric with a role-bound judge and read-only filesystem tools."""
-
-    @tool
-    def inspect_submission() -> Tool:
-        """Provide paginated file inspection without allowing the judge to mutate the submission."""
-
-        async def execute(
-            path: str,
-            start_line: int = 1,
-            lines: int = 200,
-            list_directory: bool = False,
-        ) -> str:
-            """Read a submission file or list a directory.
-
-            Args:
-                path: Absolute path to a source file, directory, or log.
-                start_line: First line to read, starting at one.
-                lines: Number of lines to read, at most 500 per call.
-                list_directory: List directory entries instead of reading a file.
-            """
-            if start_line < 1 or lines < 1 or lines > 500:
-                raise ValueError(
-                    "Use a positive start_line and between 1 and 500 lines"
-                )
-            command = (
-                ["ls", "-la", "--", path]
-                if list_directory
-                else [
-                    "sed",
-                    "-n",
-                    f"{start_line},{start_line + lines - 1}p",
-                    "--",
-                    path,
-                ]
-            )
-            result = await env.exec(command, timeout=30)
-            return result.stdout + result.stderr
-
-        return execute
-
-    @tool
-    def run_shell() -> Tool:
-        """Give the judge the original harness's shell access inside the already-measured scoring sandbox."""
-
-        async def execute(command: str) -> str:
-            """Run a shell command in the submission workspace.
-
-            Args:
-                command: Bash command line, executed from /home/agent/task.
-            """
-            result = await env.exec(
-                ["bash", "-lc", f"cd /home/agent/task && {command}"], timeout=600
-            )
-            return result.stdout + result.stderr
-
-        return execute
-
+    """Run the integrity judge the way upstream does: Claude Code in the submission directory, verdicts written as files."""
     folder = Path(store().get("artifacts"))
-    evidence_names = await stage_evidence(env, folder) if preload_evidence else []
-    evidence = folder / "judge-evidence" if preload_evidence else folder / "judge-no-evidence"
-    evidence.mkdir(exist_ok=True)
+    evidence_names = await stage_evidence(env, folder)
     prompt = await upstream_judge_prompt(
         select_prompt(judge_prompt, "judge_prompt"),
         SCENARIOS[state.metadata["scenario"]]["benchmark"],
         state.metadata["base_model"],
-        evidence,
+        folder / "judge-evidence",
     )
-    adapter = JUDGE_ADAPTER_ORIGINAL if preload_evidence else JUDGE_ADAPTER
-    prompt += "\n\n" + adapter.prompt.format(remote=REMOTE)
-    if judge_shell:
-        prompt += "\n\n" + JUDGE_SHELL.prompt
     if transcript_hint:
         prompt += "\n\n" + JUDGE_TRANSCRIPT.prompt.format(remote=REMOTE)
 
@@ -211,22 +145,41 @@ async def judge_submission(
             **spec.get("args", {}),
         )
     )
-    tools = [inspect_submission()] + ([run_shell()] if judge_shell else [])
-    judge = react(model=model, prompt=None, tools=tools, submit=False)
+    # The same CLI, working directory, and permission bypass as upstream's `claude --print` call.
+    judge = judge_cli(
+        model=model,
+        version=judge_cli_version,
+        cwd="/home/agent/task",
+        user="root",
+        sandbox="default",
+        permission_mode="bypassPermissions",
+        retry_refusals=0,
+    )
+    paths = [f"/home/agent/task/{name}" for name in VERDICT_FILES]
 
     result = ""
     for attempt_number in range(1, max_grader_attempts + 1):
+        # Verdicts must come from this judge run, not from files the agent left behind.
+        await checked_exec(env, ["rm", "-f", *paths], 30)
         attempt = await judge(AgentState(messages=[ChatMessageUser(content=prompt)]))
-        result = attempt.messages[-1].text
-        verdict = parse_judgment(result)
+        result = attempt.messages[-1].text if attempt.messages else ""
+        verdicts = {}
+        for name, path in zip(VERDICT_FILES, paths):
+            try:
+                verdicts[name] = await env.read_file(path)
+            except Exception:
+                # Upstream only warns when the judge leaves a verdict file unwritten.
+                continue
+        verdict = parse_judgment("\n".join(verdicts.values()))
         details = {
             "model": str(model),
             "role": grader_role,
             "attempts": attempt_number,
             "include_transcript": include_transcript,
-            "preloaded_evidence": evidence_names,
-            "judge_shell": judge_shell,
             "transcript_hint": transcript_hint,
+            "preloaded_evidence": evidence_names,
+            "judge_cli_version": judge_cli_version,
+            "verdict_files": verdicts,
         }
         if verdict is not None:
             return verdict, result, details
@@ -240,19 +193,20 @@ def inference_speedup(
     judge_prompt: str,
     max_grader_attempts: int,
     include_transcript: bool = DEFAULT_SCORER_ARGS["include_transcript"],
-    preload_evidence: bool = DEFAULT_SCORER_ARGS["preload_evidence"],
-    judge_shell: bool = DEFAULT_SCORER_ARGS["judge_shell"],
     transcript_hint: bool = DEFAULT_SCORER_ARGS["transcript_hint"],
+    judge_cli_version: str = DEFAULT_SCORER_ARGS["judge_cli_version"],
 ) -> Scorer:
     """Score held-out inference speed relative to Transformers after restart, quality, and integrity checks."""
     select_prompt(judge_prompt, "judge_prompt")
     if type(max_grader_attempts) is not int or max_grader_attempts < 1:
         raise ValueError("max_grader_attempts must be a positive integer")
-    for name, value in [("include_transcript", include_transcript), ("preload_evidence", preload_evidence), ("judge_shell", judge_shell), ("transcript_hint", transcript_hint)]:
+    for name, value in [("include_transcript", include_transcript), ("transcript_hint", transcript_hint)]:
         if type(value) is not bool:
             raise ValueError(f"{name} must be a boolean")
     if transcript_hint and not include_transcript:
         raise ValueError("transcript_hint requires include_transcript")
+    if type(judge_cli_version) is not str or not judge_cli_version or judge_cli_version in {"auto", "latest", "stable", "sandbox"}:
+        raise ValueError("judge_cli_version must be an exact Claude Code version")
 
     async def score(state, target):
         """Retain raw final measurements and distinguish invalid submissions from unavailable judgments."""
@@ -317,9 +271,8 @@ def inference_speedup(
                 judge_prompt,
                 max_grader_attempts,
                 include_transcript,
-                preload_evidence,
-                judge_shell,
                 transcript_hint,
+                judge_cli_version,
             )
             metadata["integrity_judgment"] = judgment
             metadata["integrity_judge"] = details
