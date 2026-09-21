@@ -88,7 +88,7 @@ of the paper's reported model/scaffold experiment.
 | Speed baseline | Upstream precomputes the PyTorch baseline once per scenario and seed pair and reuses it for every agent. The port does the same, keyed additionally by GPU model, precision, and evaluator revision, with the measuring sample recorded in the stored manifest. |
 | Strict prompt | The site's dagger-marked runs used an unreleased stricter prompt that names third-party pre-quantized checkpoints and harness edits as disallowed. Both configs insert two bullets stating those rules after the base-model constraint (`strict_prompt: true`); the wording is the port's. Set it false to reproduce the paper's Table 2 prompt. |
 | Inputs | Each attempt caches LongBench-v2 and MMLU-Pro with upstream's `cache_samples` and samples with upstream's tokenizer-based sampler, patched only to re-truncate when decoding drops a boundary token (upstream aborts there on some full-count seeds). Upstream's `precache_seeds.sh` writes every seed's MMLU-Pro selection to the quality-seed path, so which selection its runs used depends on shell iteration order; the port caches the quality seed explicitly. The MMLU-Pro reference is measured per attempt. |
-| Reference load | Upstream's precompute measures the Transformers speed baseline with a 900-second request timeout and its Transformers quality reference at concurrency 1; earlier port versions used 300 seconds and concurrency 4, which produced timeouts. Both now follow upstream. |
+| Reference load | Upstream's precompute measures the Transformers speed baseline with a 900-second request timeout and its Transformers quality reference at concurrency 1; earlier port versions used 300 seconds and concurrency 4, which produced timeouts. Both now follow upstream, and both measurements are shared across samples like upstream's registries. |
 | Retries | Upstream retries whole final evaluations three times, then twice with a 150-second request timeout; the port runs that schedule, minus upstream's step of killing every GPU process between attempts (which would also kill its relaunched server). Both configs retry a failed reference question once by re-running upstream's precompute for that question; `quality_baseline_max_attempts: 1` accepts upstream's registry as measured. |
 
 The paper and released code also disagree in several places. The paper describes
@@ -102,22 +102,23 @@ and [environment defaults](https://github.com/aisa-group/InferenceBench/blob/24c
 
 ## MMLU-Pro reference
 
-Each sample measures the reference on its own GPU before optimization. With
-`quality_reference_backend: transformers` (`original.yaml`), the float16
-Transformers server answers the fixed 500 questions (seed 248), about 57
-minutes on an H100. With `vllm` (`default.yaml`), a pinned vLLM 0.19.0 server
-answers them in float16 in under four minutes; on the same 500 questions it
-matched the Transformers answer on 480 and scored 156/500 against 151/500, so
-the two backends' reference accuracies are close but should not be mixed. A
-reference request that times out is retried once on its own in both
-configurations; upstream counts it as incorrect instead, a difference of at
-most one question in the gate threshold. Upstream precomputes and reuses this registry across
-runs; this port repeats the measurement per sample so no bundled answers need
-maintaining or checksum matching. The 2026-09-10 measurement was 151/500
-(30.2%), so its 95% gate required at least 144/500 from the submission; each
-run's own reference sets its gate. Each optimized server still answers every
-question; no agent or submission answers are reused. Speed is also remeasured
-against this run's GPU baseline.
+The reference is measured once per model, backend, question selection,
+precision, upstream commit and GPU model, and shared with every later sample
+from `run-artifacts/baselines/`, as upstream's precomputed registry is shared
+across its runs; both configurations resolve to the same entry. Both use the
+float16 Transformers server (`quality_reference_backend: transformers`), which
+answers the fixed 500 questions (seed 248) in about 57 minutes on an H100 and
+scored 151/500 on 2026-09-10 and 2026-09-17, so the 95% gate requires 144
+correct from a submission. The pinned vLLM 0.19.0 server answers them in under
+four minutes but scored 156 and 154 on the same questions (480 identical parsed
+answers): float16 kernel numerics flip a few near-tied greedy choices, a
+difference inside the sampling noise of 500 questions but comparable to the
+gate's margin, so vLLM is available and not the default. A reference request
+that times out is retried once on its own in both configurations; upstream
+counts it as incorrect instead, a difference of at most one question in the
+gate threshold. Each optimized server still answers every question; no agent or
+submission answers are reused. Speed is also measured against a shared baseline
+for the same GPU model.
 
 The fixed questions are not a secret test set against a root-capable agent.
 Trusted restoration protects the evaluator from stale edits; the integrity judge

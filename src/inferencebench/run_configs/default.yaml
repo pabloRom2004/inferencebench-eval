@@ -21,8 +21,8 @@ task:
     request_limit: 10
     quality_samples: 500
     quality_seed: 248
-    # vllm measures the reference in minutes; transformers is the original server.
-    quality_reference_backend: vllm
+    # The original Transformers server, measured once per model and GPU and shared from run-artifacts/baselines/; vllm measures in minutes but scores a few questions higher.
+    quality_reference_backend: transformers
     quality_tau: 0.95
     quality_concurrency: 4
     quality_baseline_max_attempts: 2

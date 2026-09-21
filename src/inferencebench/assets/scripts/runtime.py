@@ -137,7 +137,7 @@ def speed_baseline(options):
     """Measure the PyTorch speed baseline with upstream's precompute command, or install the shared measurement."""
     folder = speed_folder(options)
     folder.mkdir(parents=True, exist_ok=True)
-    cached = ARTIFACTS / "cached"
+    cached = ARTIFACTS / "cached" / "speed"
     if options.get("cached_speed_baseline"):
         for name in ["requests.jsonl", "baseline_metrics.json"]:
             if not (cached / name).is_file():
@@ -231,6 +231,30 @@ def retry_quality_reference(options, command, rows):
     return rows, retried
 
 
+def install_cached_quality_reference(options):
+    """Put a shared MMLU-Pro reference where upstream's gate reads it, with the exact questions it was measured on."""
+    cached = ARTIFACTS / "cached" / "quality"
+    registry = cached / registry_name(options)
+    samples = INFERENCE / "baselines/samples/mmlu_pro" / f"{options['quality_seed']}_{options['quality_samples']}" / "samples.jsonl"
+    for path in [registry, cached / "samples.jsonl", cached / "baseline_generations.jsonl"]:
+        if not path.is_file():
+            raise RuntimeError("Shared quality reference files were not transferred to the sandbox")
+    (INFERENCE / "baselines/quality").mkdir(parents=True, exist_ok=True)
+    shutil.copy(registry, INFERENCE / "baselines/quality" / registry.name)
+    # Present before upstream's sampler runs, so it keeps these questions instead of drawing them again.
+    samples.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(cached / "samples.jsonl", samples)
+    manifest = json.loads((cached / "manifest.json").read_text()) if (cached / "manifest.json").is_file() else {}
+    return {
+        "registry": INFERENCE / "baselines/quality" / registry.name,
+        "generations": cached / "baseline_generations.jsonl",
+        "concurrency": manifest.get("concurrency"),
+        "retried_requests": manifest.get("retried_requests"),
+        "complete": manifest.get("complete"),
+        "vllm_version": manifest.get("vllm_version"),
+    }
+
+
 def assemble_bundle():
     """Populate the read-only evaluator bundle the way upstream's harness does, with this run's caches and registries."""
     BUNDLE.mkdir(parents=True, exist_ok=True)
@@ -242,30 +266,35 @@ def assemble_bundle():
 
 
 def prepare(options):
-    """Cache inputs, measure the speed baseline and quality reference, and install the original workspace before timing starts."""
+    """Cache inputs, measure or install the speed baseline and quality reference, and set up the original workspace before timing starts."""
     from huggingface_hub import snapshot_download
 
     ARTIFACTS.mkdir(exist_ok=True)
     snapshot = snapshot_download(options["base_model"], ignore_patterns=["*.pt", "*.bin", "original/*"])
+    speed_cached = bool(options.get("cached_speed_baseline"))
+    quality_cached = bool(options.get("cached_quality_reference"))
+    transformers_reference = options["quality_reference_backend"] == "transformers"
+    reference = install_cached_quality_reference(options) if quality_cached else None
     cache_samples(options)
 
-    cached = bool(options.get("cached_speed_baseline"))
-    transformers_reference = options["quality_reference_backend"] == "transformers"
-    reference = None
     shutil.rmtree(TRUSTED, ignore_errors=True)
     (TRUSTED / "speed").mkdir(parents=True)
     (TRUSTED / "quality").mkdir()
-    with baseline_server(options) if (not cached or transformers_reference) else nullcontext():
+    # The Transformers server serves the speed baseline and, in the original configuration, the reference.
+    needs_torch = not speed_cached or (transformers_reference and not quality_cached)
+    with baseline_server(options) if needs_torch else nullcontext():
         speed = speed_baseline(options)
         for name in ["requests.jsonl", "baseline_metrics.json", "baseline_generations.jsonl"]:
             if (speed / name).is_file():
                 shutil.copy(speed / name, TRUSTED / "speed" / name)
-        if transformers_reference:
+        if transformers_reference and not quality_cached:
             reference = quality_reference(options)
     vllm_version = None
-    if not transformers_reference:
+    if not transformers_reference and not quality_cached:
         with reference_server(options) as vllm_version:
             reference = quality_reference(options)
+    if quality_cached:
+        vllm_version = reference["vllm_version"]
 
     sys.path.insert(0, str(ROOT / "src/eval"))
     from inference import quality_gate
@@ -280,13 +309,14 @@ def prepare(options):
         "downloaded_model_revision": Path(snapshot).name,
         "input_sha256": {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in [speed / "requests.jsonl", samples]},
         "quality_reference": {
+            "source": "cached" if quality_cached else "measured",
             "backend": options["quality_reference_backend"],
             "vllm_version": vllm_version,
             "concurrency": reference["concurrency"],
             "retried_requests": reference["retried_requests"],
             "complete": reference["complete"],
         },
-        "speed_baseline": "cached" if cached else "measured",
+        "speed_baseline": "cached" if speed_cached else "measured",
     }
 
     # Everything final scoring restores from the controller after the restart.

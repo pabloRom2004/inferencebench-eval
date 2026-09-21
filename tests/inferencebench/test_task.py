@@ -1590,9 +1590,9 @@ def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):
     assert flags["--registry"] == str(tmp_path / "inference/baselines/speed/torch/mistralai_Mistral-7B-Instruct-v0.3.json")
     assert flags["--request-timeout-s"] == "900" and flags["--concurrency-override"] == "1" and flags["--request-limit"] == "10"
 
-    (tmp_path / "artifacts/cached").mkdir(parents=True)
+    (tmp_path / "artifacts/cached/speed").mkdir(parents=True)
     for name in ["requests.jsonl", "baseline_metrics.json"]:
-        (tmp_path / "artifacts/cached" / name).write_text(name)
+        (tmp_path / "artifacts/cached/speed" / name).write_text(name)
     runtime.speed_baseline({**options, "cached_speed_baseline": True})
     assert len(commands) == 1 and (folder / "baseline_metrics.json").read_text() == "baseline_metrics.json"
 
@@ -1660,9 +1660,10 @@ def test_quality_reference_completion_policy(monkeypatch, tmp_path, attempts, re
     assert [row["request_index"] for row in resolved] == [0, 1] and resolved[0]["parsed_answer"] == "B" and resolved[1]["success"]
 
 
+@pytest.mark.parametrize("cached", [False, True])
 @pytest.mark.parametrize("backend", ["transformers", "vllm"])
-def test_prepare_orders_servers_and_records_provenance(monkeypatch, tmp_path, backend):
-    """Start upstream's Transformers server for the speed baseline, measure the reference on the configured backend, and record provenance."""
+def test_prepare_orders_servers_and_records_provenance(monkeypatch, tmp_path, backend, cached):
+    """Start upstream's Transformers server for the speed baseline, measure or install the reference for the configured backend, and record provenance."""
     from inferencebench.assets.scripts import runtime
     from inferencebench.vendored import UPSTREAM
 
@@ -1710,11 +1711,25 @@ def test_prepare_orders_servers_and_records_provenance(monkeypatch, tmp_path, ba
     monkeypatch.setattr(runtime.os, "killpg", Mock(side_effect=lambda pid, sig: events.append("stop")))
 
     options = upstream_options(quality_samples=2, quality_reference_backend=backend, baseline_dtype="bfloat16")
+    registry = "mistralai_Mistral-7B-Instruct-v0.3" + ("_torch" if backend == "transformers" else "") + ".json"
+    if cached:
+        shared = tmp_path / "artifacts/cached/quality"
+        shared.mkdir(parents=True)
+        (shared / registry).write_text(json.dumps({"datasets": {"mmlu_pro": [{"seed": 248, "n": 2, "accuracy": 0.5}]}}))
+        (shared / "samples.jsonl").write_text('{"sample_id": "shared"}\n')
+        (shared / "baseline_generations.jsonl").write_text("{}\n")
+        (shared / "manifest.json").write_text(json.dumps({"vllm_version": "0.19.0" if backend == "vllm" else None, "concurrency": 1 if backend == "transformers" else 4, "retried_requests": 0, "complete": True}))
+        options["cached_quality_reference"] = True
     runtime.prepare(options)
     assert all(command[command.index("--dtype") + 1] == "bfloat16" for command in commands)
     assert commands[0][:4] == ["python3", "-u", "-m", "src.eval.inference.servers.transformers_openai_server"]
     transformers, vllm = ("start", "src.eval.inference.servers.transformers_openai_server"), ("start", "serve")
-    if backend == "transformers":
+    if cached:
+        assert events == ["cache_samples", "cache_samples", "cache_samples", transformers, "precompute_baseline", "stop"]
+        assert calls == []
+        assert (tmp_path / "inference/baselines/quality" / registry).is_file()
+        assert (tmp_path / "inference/baselines/samples/mmlu_pro/248_2/samples.jsonl").read_text() == '{"sample_id": "shared"}\n'
+    elif backend == "transformers":
         assert events == ["cache_samples", "cache_samples", "cache_samples", transformers, "precompute_baseline", "precompute_quality_baseline", "stop"]
         assert calls[0][0]["--concurrency"] == "1" and calls[0][0]["--backend"] == "torch"
     else:
@@ -1722,7 +1737,8 @@ def test_prepare_orders_servers_and_records_provenance(monkeypatch, tmp_path, ba
         assert calls[0][0]["--concurrency"] == "4" and calls[0][0]["--backend"] == "vllm" and calls[0][0]["--registry"].endswith("/mistralai_Mistral-7B-Instruct-v0.3.json")
     trusted = tmp_path / "artifacts/trusted"
     provenance = json.loads((trusted / "provenance.json").read_text())
-    assert provenance["quality_reference"] == {"backend": backend, "vllm_version": "0.19.0" if backend == "vllm" else None, "concurrency": 1 if backend == "transformers" else 4, "retried_requests": 0, "complete": True}
+    assert provenance["quality_reference"] == {"source": "cached" if cached else "measured", "backend": backend, "vllm_version": "0.19.0" if backend == "vllm" else None, "concurrency": 1 if backend == "transformers" else 4, "retried_requests": 0, "complete": True}
+    assert (trusted / "quality" / registry).is_file() and (trusted / "quality/samples.jsonl").is_file()
     assert provenance["upstream"]["commit"] == "abc" and provenance["speed_baseline"] == "measured" and provenance["downloaded_model_revision"] == "rev"
     assert (trusted / "speed/requests.jsonl").is_file() and (trusted / "speed/baseline_metrics.json").is_file()
     assert (trusted / "quality/samples.jsonl").is_file() and (trusted / "quality/baseline_generations.jsonl").is_file()
@@ -1832,7 +1848,9 @@ def prepare_archive(rows, provenance=True):
         add("speed/baseline_generations.jsonl", "{}\n")
         if provenance:
             add("quality/samples.jsonl", "{}\n")
-            add("provenance.json", json.dumps({"downloaded_model_revision": "rev", "speed_baseline": "measured"}))
+            add("quality/baseline_generations.jsonl", "{}\n")
+            add("quality/mistralai_Mistral-7B-Instruct-v0.3_torch.json", json.dumps({"datasets": {"mmlu_pro": [{"seed": 248, "n": 500, "accuracy": 0.302}]}}))
+            add("provenance.json", json.dumps({"downloaded_model_revision": "rev", "speed_baseline": "measured", "quality_reference": {"source": "measured", "backend": "transformers", "vllm_version": None, "concurrency": 1, "retried_requests": 0, "complete": True}}))
             add("environment.json", json.dumps({"INFERENCE_BENCH_BASE_MODEL": "mistralai/Mistral-7B-Instruct-v0.3"}))
     return buffer.getvalue()
 
@@ -1865,8 +1883,8 @@ def host_environment(tmp_path, prepare_outcomes):
             written["upstream"] = len(content)
 
     async def upload(local, remote):
-        """Record which shared files reach the sandbox."""
-        uploads.append(Path(local).name)
+        """Record which shared files reach the sandbox, by cache kind."""
+        uploads.append(remote.removeprefix("/tmp/inferencebench/cached/"))
 
     async def download(remote, local):
         """Return the preparation archive, with provenance only after a successful preparation."""
@@ -1876,11 +1894,11 @@ def host_environment(tmp_path, prepare_outcomes):
     return env, written, uploads, prepares
 
 
-def test_speed_baseline_reuse(monkeypatch, tmp_path):
-    """Measure the speed baseline once per workload and GPU model, install the upstream copy each time, and share the stored files."""
+def test_shared_measurements_reuse(monkeypatch, tmp_path):
+    """Measure the speed baseline and quality reference once per workload and GPU model, install the upstream copy each time, and share the stored files."""
     environment = importlib.import_module("inferencebench.environment")
     monkeypatch.setattr(environment, "BASELINE_CACHE", tmp_path / "baselines")
-    env, written, uploads, prepares = host_environment(tmp_path, ["pass", "pass", "pass"])
+    env, written, uploads, prepares = host_environment(tmp_path, ["pass", "pass", "pass", "pass"])
     monkeypatch.setattr(environment, "gpu_environment", lambda: env)
     monkeypatch.setattr(SCORERS, "restart_for_scoring", AsyncMock(return_value=env))
 
@@ -1895,21 +1913,35 @@ def test_speed_baseline_reuse(monkeypatch, tmp_path):
     first = run()
     assert written["upstream"] > 100_000
     assert prepares[-1]["cached_speed_baseline"] is False and first["speed_baseline"]["source"] == "measured"
+    assert prepares[-1]["cached_quality_reference"] is False and first["quality_reference"]["source"] == "measured"
     assert first["provenance"]["downloaded_model_revision"] == "rev"
-    [stored] = list((tmp_path / "baselines").iterdir())
-    manifest = json.loads((stored / "manifest.json").read_text())
+    [speed] = [f for f in (tmp_path / "baselines").iterdir() if f.name.startswith("A-seed1337")]
+    [quality] = [f for f in (tmp_path / "baselines").iterdir() if f.name.startswith("quality-transformers-seed248-n500")]
+    manifest = json.loads((speed / "manifest.json").read_text())
     assert manifest["identity"]["gpu"] == "NVIDIA H100 80GB HBM3" and manifest["identity"]["scenario"] == "A" and manifest["identity"]["eval_seed"] == 1337
     assert manifest["identity"]["upstream_commit"].startswith("24cdf88") and manifest["identity"]["patches"]
-    assert all((stored / name).exists() for name in ["requests.jsonl", "baseline_metrics.json", "baseline_generations.jsonl"])
+    assert all((speed / name).exists() for name in ["requests.jsonl", "baseline_metrics.json", "baseline_generations.jsonl"])
+    reference = json.loads((quality / "manifest.json").read_text())
+    assert reference["identity"]["backend"] == "transformers" and reference["identity"]["concurrency"] == 1 and "scenario" not in reference["identity"]
+    assert reference["complete"] is True and reference["retried_requests"] == 0
+    assert sorted(f.name for f in quality.iterdir()) == ["baseline_generations.jsonl", "manifest.json", "mistralai_Mistral-7B-Instruct-v0.3_torch.json", "samples.jsonl"]
     assert uploads == []
 
     second = run()
     assert prepares[-1]["cached_speed_baseline"] is True and second["speed_baseline"]["source"] == "cache"
-    assert sorted(uploads) == ["baseline_metrics.json", "requests.jsonl"]
-    assert second["speed_baseline"]["folder"] == str(stored.resolve())
+    assert prepares[-1]["cached_quality_reference"] is True and second["quality_reference"]["source"] == "cache"
+    assert sorted(uploads) == ["quality/baseline_generations.jsonl", "quality/manifest.json", "quality/mistralai_Mistral-7B-Instruct-v0.3_torch.json", "quality/samples.jsonl", "speed/baseline_metrics.json", "speed/requests.jsonl"]
+    assert second["speed_baseline"]["folder"] == str(speed.resolve()) and second["quality_reference"]["folder"] == str(quality.resolve())
 
-    run(seed_pairs=[[21, 428]])
-    assert prepares[-1]["cached_speed_baseline"] is False and len(list((tmp_path / "baselines").iterdir())) == 2
+    uploads.clear()
+    third = run(seed_pairs=[[21, 428]])
+    assert prepares[-1]["cached_speed_baseline"] is False and prepares[-1]["cached_quality_reference"] is True
+    assert third["quality_reference"]["folder"] == str(quality.resolve()) and len(list((tmp_path / "baselines").iterdir())) == 3
+
+    # The original configuration on the same model resolves to the same stored reference.
+    original = load_config("run_configs/original.yaml")["task"]["args"]
+    run(**{**original, "scenarios": "A", "seed_pairs": [[21, 428]], "agent_seconds": 2})
+    assert prepares[-1]["cached_quality_reference"] is True and prepares[-1]["cached_speed_baseline"] is False
 
 
 def test_prepare_failure_retains_measured_speed_baseline(monkeypatch, tmp_path):
@@ -1940,9 +1972,28 @@ def test_prepare_failure_retains_measured_speed_baseline(monkeypatch, tmp_path):
     failed = run()
     assert failed.status == "error" and "reference failed" in failed.error.message
     [stored] = list((tmp_path / "baselines").iterdir())
-    assert (stored / "requests.jsonl").exists() and (stored / "baseline_metrics.json").exists()
+    assert stored.name.startswith("A-seed1337") and (stored / "requests.jsonl").exists() and (stored / "baseline_metrics.json").exists()
     passed = run()
     assert passed.status == "success", passed.error
-    assert prepares[-1]["cached_speed_baseline"] is True
-    assert sorted(uploads) == ["baseline_metrics.json", "requests.jsonl"]
+    assert prepares[-1]["cached_speed_baseline"] is True and prepares[-1]["cached_quality_reference"] is False
+    assert sorted(uploads) == ["speed/baseline_metrics.json", "speed/requests.jsonl"]
     assert passed.samples[0].metadata["speed_baseline"]["source"] == "cache"
+    assert passed.samples[0].metadata["quality_reference"]["source"] == "measured" and len(list((tmp_path / "baselines").iterdir())) == 2
+
+
+def test_quality_reference_identity_is_shared_by_both_configurations():
+    """Key the shared reference only by what determines the measurement, so default and original on one model resolve to one entry."""
+    from inferencebench.environment import (
+        quality_reference_identity,
+        speed_baseline_identity,
+    )
+
+    default = inference_bench(scenarios="A", seed_pairs=[[21, 1337]]).dataset[0].metadata
+    original = inference_bench(**{**load_config("run_configs/original.yaml")["task"]["args"], "scenarios": "D", "seed_pairs": [[999, 777]]}).dataset[0].metadata
+    identity = quality_reference_identity(default, "NVIDIA H100 80GB HBM3")
+    assert identity == quality_reference_identity(original, "NVIDIA H100 80GB HBM3")
+    assert identity["backend"] == "transformers" and identity["concurrency"] == 1 and identity["quality_seed"] == 248 and identity["quality_samples"] == 500
+    assert not {"scenario", "eval_seed", "dev_seed", "request_limit", "config_defaults", "agent_seconds", "system_prompt"} & identity.keys()
+    assert quality_reference_identity({**default, "quality_reference_backend": "vllm"}, "NVIDIA H100 80GB HBM3") != identity
+    assert quality_reference_identity(default, "NVIDIA A100 80GB PCIe") != identity
+    assert speed_baseline_identity(default, "NVIDIA H100 80GB HBM3") != speed_baseline_identity(original, "NVIDIA H100 80GB HBM3")
