@@ -34,8 +34,10 @@ ssh_keepalive_interval_seconds: 30
 
 ssh_keepalive_count_max: 3
 
-startup_timeout_seconds: 900
+# Covers initial installation and restoring the filesystem after the scoring restart.
+startup_timeout_seconds: 7200
 
-snapshot_timeout_seconds: 900
+# Saving an installed environment can take longer on a slow attached volume.
+snapshot_timeout_seconds: 7200
 
 poll_interval_seconds: 5
