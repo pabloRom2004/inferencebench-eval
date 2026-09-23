@@ -1,6 +1,7 @@
-# Install the shared environment on the public CUDA image; a prebuilt image is optional.
+# Fetch the public CUDA image from NVIDIA to avoid Docker Hub anonymous pull limits.
+# CUDA 12.8.0, cuDNN, Ubuntu 22.04; identical digest to the Docker Hub image.
 pod:
-  imageName: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
+  imageName: nvcr.io/nvidia/cuda@sha256:c900a2ac7f3d860c854f7364eadfe32b8cd33933a838f96b71e9bb6525f77a8c
   cloudType: SECURE
   computeType: GPU
   gpuTypeIds: [NVIDIA H100 80GB HBM3]
