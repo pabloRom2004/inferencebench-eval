@@ -250,16 +250,16 @@ The standalone package follows the HLE module layout and the neighboring Exploit
 
 ## Hawk with RunPod
 
-Hawk 2.5.0's deployed Helm template forces Kubernetes sandbox conversion, even
+The deployed Hawk Helm template forces Kubernetes sandbox conversion, even
 when `runner.environment.HAWK_RUNNER_PATCH_SANDBOX` is false. The small
 [`infra/hawk-runner/Dockerfile`](../infra/hawk-runner/Dockerfile) uses Hawk's
 existing external-sandbox option at process startup. It changes no benchmark
 logic and retains Hawk's rejection of nonstandard isolation without its
 Kubernetes controls. Use it only for this task's standard RunPod setup.
 
-The main-branch workflow publishes an immutable commit tag to GHCR whenever the runner Dockerfile or the workflow changes. Set
-`runner.image` to that image's digest. Keep provider credentials in Hawk secrets.
-The tested run configuration uses `HAWK_RUNNER_REFRESH_TOKEN: ""` so the supplied
+The main and Codex feature-branch workflow publishes an immutable commit tag to GHCR whenever the runner Dockerfile or the workflow changes. Set
+`runner.image` to that image's digest. The runner pins Hawk 3.5.0 and Inspect 0.3.265. Keep provider credentials in Hawk secrets.
+The tested run configuration uses `HAWK_RUNNER_REFRESH_URL: ""` so the supplied
 work API key is not replaced by Hawk OAuth, and a fixed `UV_EXCLUDE_NEWER` date
 so Hawk's default one-week package cutoff does not exclude the required SDK.
 

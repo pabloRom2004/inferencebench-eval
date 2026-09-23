@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git libjemalloc
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 65532 --create-home nonroot
 COPY --from=uv /uv /uvx /usr/local/bin/
-RUN uv pip install --system 'hawk[runner]==2.5.0' 'inspect-ai==0.3.263'
+RUN uv pip install --system 'hawk[runner]==3.5.0' 'inspect-ai==0.3.265'
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 UV_LINK_MODE=copy
 ENV LD_PRELOAD=libjemalloc.so.2
 WORKDIR /home/nonroot
