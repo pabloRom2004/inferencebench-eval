@@ -18,6 +18,8 @@ task:
     system_prompt: original
     # The paper's Table 2 used false; the site's dagger-marked rows used the strict prompt.
     strict_prompt: true
+    # Require an automated search tool during hyperparameter tuning.
+    automated_tuning: false
     request_limit: null
     quality_samples: 500
     quality_seed: 248

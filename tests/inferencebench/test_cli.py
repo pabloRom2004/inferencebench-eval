@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from inspect_ai import eval as inspect_eval
-from inspect_ai.agent import agent, as_solver
+from inspect_ai.agent import agent
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import (
     ChatMessageUser,
@@ -18,13 +18,15 @@ from inspect_ai.model import (
 )
 from inspect_ai.tool import ToolInfo
 
-from inferencebench.cli import CLI_HARNESSES, cli_agent
+from inferencebench.harness_default import CLI_HARNESSES, cli_agent, default_agent
 from tests.inferencebench.test_task import fake_judge_cli as fake_judge_cli
 from tests.inferencebench.test_task import judge_model
 from tests.inferencebench.test_task import local_task as local_task
 from tests.inferencebench.test_task import remove_mock_logs as remove_mock_logs
 
-CLI = importlib.import_module("inferencebench.cli")
+CLI = importlib.import_module("inferencebench.harness_default")
+UTILS = importlib.import_module("inferencebench.utils.harnesses.cli.options")
+BRIDGE = importlib.import_module("inferencebench.utils.harnesses.cli.bridge")
 
 
 @pytest.mark.parametrize("harness", CLI_HARNESSES)
@@ -33,7 +35,7 @@ def test_cli_continuation_and_scoring(local_task, monkeypatch, harness, continue
     """Keep one CLI session, refresh its budget, and grade once after stopping or reaching the cap."""
     observed = []
     requests = []
-    original = getattr(CLI.inspect_swe, harness)
+    original = getattr(importlib.import_module("inspect_swe"), harness)
 
     @functools.wraps(original)
     def factory(**kwargs):
@@ -61,9 +63,9 @@ def test_cli_continuation_and_scoring(local_task, monkeypatch, harness, continue
 
         return stub()
 
-    monkeypatch.setattr(CLI.inspect_swe, harness, factory)
+    monkeypatch.setattr(importlib.import_module("inspect_swe"), harness, factory)
     monkeypatch.setattr(
-        CLI,
+        UTILS,
         "get_model_info",
         lambda model: ModelInfo(context_length=1048576, output_tokens=131072),
     )
@@ -71,8 +73,10 @@ def test_cli_continuation_and_scoring(local_task, monkeypatch, harness, continue
     env.write_file = AsyncMock()
     env.exec_remote = AsyncMock()
     monkeypatch.setattr(CLI, "sandbox", lambda name=None: env)
+    monkeypatch.setattr(UTILS, "sandbox", lambda name=None: env)
+    monkeypatch.setattr(BRIDGE, "sandbox", lambda name=None: env)
     task.dataset[0].metadata["agent_seconds"] = None
-    task.solver = as_solver(cli_agent(harness, nudge_prompt=continue_work))
+    task.solver = default_agent(harness=harness, nudge_prompt=continue_work)
     outputs = [ModelOutput.from_content("mockllm/subject", "Ready") for _ in range(5)]
     for output in outputs:
         output.usage = ModelUsage(input_tokens=100, output_tokens=100, total_tokens=200)
@@ -100,10 +104,15 @@ def test_cli_continuation_and_scoring(local_task, monkeypatch, harness, continue
     env.terminate.assert_awaited_once()
     if harness == "claude_code":
         assert observed[0]["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "1048576"
-        assert observed[0]["env"]["INFERENCE_BENCH_BASE_MODEL"] == "mistralai/Mistral-7B-Instruct-v0.3"
+        assert (
+            observed[0]["env"]["INFERENCE_BENCH_BASE_MODEL"]
+            == "mistralai/Mistral-7B-Instruct-v0.3"
+        )
         assert observed[0]["env"]["INFERENCE_BENCH_MAX_MODEL_LEN"] == "32768"
         assert "Kernel Optimization" in env.write_file.await_args_list[0].args[1]
-        assert all("start_server.sh" not in request.input[-1].text for request in requests)
+        assert all(
+            "start_server.sh" not in request.input[-1].text for request in requests
+        )
 
 
 @pytest.mark.parametrize(
@@ -119,7 +128,7 @@ def test_cli_summary_keeps_budget_out_of_compaction():
     """Leave summary-only requests untouched without requiring a live sample budget."""
     from inspect_ai.model import GenerateInput
 
-    from inferencebench.reminders import cli_reminders
+    from inferencebench.harness_default import cli_reminders
 
     summary = GenerateInput(
         input=[

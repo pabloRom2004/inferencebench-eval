@@ -29,7 +29,7 @@ PROMPTS = {
         prompt=(ASSETS / "prompts" / "token_prompt.txt").read_text(),
         role="subject",
         origin=f"{UPSTREAM}/src/eval/general/prompt.txt",
-        origin_note="Original task text with only wall-clock instructions adapted to a token budget.",
+        origin_note="Original task text adapted to the configured token budget and optional optimization deadline.",
         inspect_parameter="system_prompt",
         affordances={
             "tools": "Root shell, Python, web search, Internet, and the H100 server workspace."
@@ -70,6 +70,38 @@ STRICT_RULES = Prompt(
     origin="Inspect port; the leaderboard's strict-prompt footnote at https://inferencebench.ai (retrieved 2026-09-17)",
     origin_note="The strict prompt behind the site's dagger-marked runs is unreleased; these bullets state the footnote's two rules in the original prompt's style and are inserted after its base-model constraint.",
     inspect_parameter="strict_prompt",
+)
+
+AUTOMATED_TUNING = Prompt(
+    title="automated_hyperparameter_tuning",
+    prompt=(
+        "When you reach the hyperparameter-tuning stage, you must use an automated optimization tool or programmatic search loop. "
+        "Do not tune hyperparameters by manually choosing, editing, and testing one configuration at a time. "
+        "Define a search space and a measured objective, then use a tool such as Optuna or an equivalent automated random or Bayesian search "
+        "to select and evaluate multiple configurations without manually choosing each trial. "
+        "Run GPU trials sequentially on your single H100. Record each configuration, its measured score, and any failures, and respect the benchmark's quality requirements. "
+        "Use the remaining time to confirm the best valid configuration and leave it reproducibly encoded in start_server.sh. "
+        "Manual changes are allowed to implement the search and fix errors, but must not replace automated hyperparameter search."
+    ),
+    role="subject",
+    origin="Inspect port; user-requested automated-tuning comparison",
+    origin_note="Optional instruction appended to the task prompt; it does not install or choose an optimization tool for the agent.",
+    inspect_parameter="automated_tuning",
+)
+
+TOKEN_BUDGET_DESCRIPTION = Prompt(
+    title="token_budget_description",
+    prompt="Use the full token budget shown in the live reminders; there is no wall-clock optimization limit.",
+    role="subject",
+    origin="Inspect port's maintained token-budget prompt",
+)
+
+TIMED_BUDGET_DESCRIPTION = Prompt(
+    title="timed_budget_description",
+    prompt="You have {num_hours} hours of wall-clock optimization time, starting after environment preparation. The token limit also applies; stop when either budget ends. Use ./timer.sh to check the remaining time and leave the best working start_server.sh ready before the deadline.",
+    role="subject",
+    origin="Inspect port; render the configured agent_seconds deadline in the maintained prompt",
+    inspect_parameter="agent_seconds",
 )
 
 ORIGINAL_CLI_CONTEXT = Prompt(
@@ -122,6 +154,9 @@ PROMPTS.update(
         prompt.title: prompt
         for prompt in [
             STRICT_RULES,
+            AUTOMATED_TUNING,
+            TOKEN_BUDGET_DESCRIPTION,
+            TIMED_BUDGET_DESCRIPTION,
             ORIGINAL_CLI_CONTEXT,
             CONTINUE_PROMPT,
             NUDGE_PROMPT,

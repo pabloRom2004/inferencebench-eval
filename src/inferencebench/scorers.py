@@ -24,7 +24,7 @@ from inferencebench.metrics import (
     unscored_attempts,
 )
 from inferencebench.prompts import JUDGE_TRANSCRIPT, Prompt, select_prompt
-from inferencebench.run_config import load_config
+from inferencebench.utils.run_config import load_config
 from inferencebench.vendored import UPSTREAM
 
 DEFAULT_SCORER_ARGS = load_config()["task"]["args"]["scorer"]["args"]

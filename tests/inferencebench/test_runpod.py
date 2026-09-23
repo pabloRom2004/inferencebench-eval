@@ -28,8 +28,8 @@ from inspect_ai.util import (
 )
 
 from inferencebench import cli_agent, inference_bench, react_agent
+from inferencebench.environment import RunPodSandbox
 from inferencebench.prompts import ASSETS
-from inferencebench.runpod_sandbox import RunPodSandbox
 from tests.inferencebench.test_task import fake_judge_cli as fake_judge_cli
 
 
@@ -403,7 +403,7 @@ async def docker_pods(monkeypatch, tmp_path, request):
         (ASSETS.parent / "Dockerfile").read_text()
     )
     monkeypatch.setattr(
-        importlib.import_module("inferencebench.runpod_sandbox"), "ASSETS", context
+        importlib.import_module("inferencebench.environment"), "ASSETS", context
     )
     (context / "Dockerfile").write_text("""FROM ubuntu:22.04
 RUN apt-get update && apt-get install -y openssh-server rsync python3 && rm -rf /var/lib/apt/lists/*

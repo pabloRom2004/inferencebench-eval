@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import hashlib
 import io
 import json
 import os
 import re
+import shlex
 import shutil
 import tarfile
 import time
@@ -10,17 +13,20 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+import httpx
+import modal
 from fsspec.core import url_to_fs
 from inspect_ai.hooks import Hooks, hooks
 from inspect_ai.log import transcript
 from inspect_ai.model import ModelInfo, get_model, get_model_info, set_model_info
 from inspect_ai.solver import Solver, solver
-from inspect_ai.util import sandbox, store
+from inspect_ai.util import sandbox, sandboxenv, store
 
 from inferencebench.dataset import num_hours_text
-from inferencebench.modal_sandbox import InferenceSandbox
 from inferencebench.prompts import ASSETS
-from inferencebench.runpod_sandbox import RunPodSandbox
+from inferencebench.utils.run_config import load_config
+from inferencebench.utils.sandboxes.modal import FileSystemModalSandbox
+from inferencebench.utils.sandboxes.runpod import RunPodSandbox as BaseRunPodSandbox
 from inferencebench.vendored import patch_digest, upstream_archive, upstream_lock
 
 REMOTE = "/tmp/inferencebench"
@@ -419,3 +425,147 @@ def write_agent_transcript(path: Path, state) -> None:
         output.write('\n], "messages": ')
         json.dump([m.model_dump(mode="json") for m in state.messages], output, indent=2)
         output.write("}\n")
+
+
+@sandboxenv(name="inferencebench_modal")
+class InferenceSandbox(FileSystemModalSandbox):
+    """Restart the submitted filesystem on a fresh GPU for trusted scoring."""
+
+    async def restart(self, config_file: str | None) -> InferenceSandbox:
+        """Preserve the submitted filesystem and allocate a fresh H100 without its running processes, keeping this registered object."""
+        image = await self.sandbox.snapshot_filesystem.aio(timeout=55)
+        await self.terminate()
+        config = load_config(config_file or "assets/sandboxes/compose.yaml")
+        resources = config["services"]["default"]
+        app = await modal.App.lookup.aio(
+            "inferencebench-scoring", create_if_missing=True
+        )
+        remote = await modal.Sandbox.create.aio(
+            "sleep",
+            "infinity",
+            app=app,
+            image=image,
+            gpu=config["x-modal"]["gpu"],
+            cpu=resources["cpus"],
+            memory=int(resources["mem_limit"].removesuffix("g")) * 1024,
+            timeout=config["x-modal"]["timeout"],
+            workdir=resources["working_dir"],
+        )
+        # Inspect SWE resolves the sample's sandbox by name, so the judge must find the replacement here.
+        self.sandbox = remote
+        return self
+
+
+@sandboxenv(name="inferencebench_runpod")
+class RunPodSandbox(BaseRunPodSandbox):
+    """Bootstrap and restart the benchmark's workload on its persistent GPU volume."""
+
+    default_config = Path(__file__).parent / "assets/sandboxes/runpod.yaml"
+    working_dir = "/home/agent/task"
+    environment_file = "/etc/inferencebench-env.sh"
+    boot_file = "/run/inferencebench-boot-id"
+    name_prefix = "inferencebench-"
+    ssh_public_key_env = "INFERENCEBENCH_SSH_PUBLIC_KEY"
+    ssh_host_key_env = "INFERENCEBENCH_SSH_HOST_KEY"
+
+    def _startup_command(self) -> str:
+        """Install the Dockerfile's shared environment on first boot, or restore it after restart."""
+        dockerfile = (ASSETS.parent / "Dockerfile").read_text().replace("\\\n", "")
+        exports = [
+            "export " + line[4:]
+            for line in dockerfile.splitlines()
+            if line.startswith("ENV ")
+        ]
+        script = "set -e\n" + "\n".join(exports) + "\n"
+        if self.config["bootstrap"]:
+            script += "if [ ! -f /workspace/.inferencebench/ready ]; then\n"
+            script += (
+                "bash -c "
+                + shlex.quote((ASSETS / "scripts" / "setup_environment.sh").read_text())
+                + "\n"
+            )
+            script += "elif ! command -v rsync >/dev/null || ! command -v sshd >/dev/null; then\n"
+            script += "apt-get update && apt-get install -y rsync openssh-server python3\nfi\n"
+        script += "mkdir -p /opt\nprintf %s " + shlex.quote(
+            (ASSETS / "scripts" / "runpod_start.sh").read_text()
+        )
+        script += " > /opt/runpod_start.sh\nexec bash /opt/runpod_start.sh"
+        return script
+
+
+    @staticmethod
+    def _configuration(path) -> dict:
+        """Resolve the complete provider YAML and reject missing prerequisites before a paid API call."""
+        config = load_config(path or "assets/sandboxes/runpod.yaml")
+        # Existing complete provider configs predate the transport keepalive controls.
+        defaults = load_config("assets/sandboxes/runpod.yaml")
+        for name in ["ssh_keepalive_interval_seconds", "ssh_keepalive_count_max"]:
+            config.setdefault(name, defaults[name])
+        config["pod"]["imageName"] = (
+            os.environ.get("RUNPOD_IMAGE") or config["pod"]["imageName"]
+        )
+        if not os.environ.get("RUNPOD_API_KEY") or not config["pod"]["imageName"]:
+            raise ValueError(
+                "RunPod requires RUNPOD_API_KEY and an image in RUNPOD_IMAGE or pod.imageName"
+            )
+        if type(config["bootstrap"]) is not bool:
+            raise ValueError("bootstrap must be true or false")
+        if (
+            config["pod"]["volumeMountPath"] != "/workspace"
+            or config["pod"]["volumeInGb"] <= 0
+        ):
+            raise ValueError(
+                "RunPod requires a persistent volume at /workspace for the scoring restart"
+            )
+        for name in [
+            "api_timeout_seconds",
+            "api_retry_attempts",
+            "ssh_keepalive_interval_seconds",
+            "ssh_keepalive_count_max",
+            "startup_timeout_seconds",
+            "snapshot_timeout_seconds",
+            "poll_interval_seconds",
+            "create_retry_attempts",
+            "create_retry_interval_seconds",
+        ]:
+            if type(config[name]) is not int or config[name] <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        return config
+
+
+    async def restart(self, config_file: str | None) -> RunPodSandbox:
+        """Snapshot the installed filesystem to the volume and reboot the pod before grading."""
+        boot = await self.read_file("/run/inferencebench-boot-id")
+        await self.write_file(
+            "/opt/runpod_start.sh", (ASSETS / "scripts" / "runpod_start.sh").read_text()
+        )
+        result = await self.exec(
+            ["bash", "/opt/runpod_start.sh", "snapshot"],
+            timeout=self.config["snapshot_timeout_seconds"],
+        )
+        if not result.success:
+            raise RuntimeError(f"RunPod filesystem snapshot failed: {result.stderr}")
+        for attempt in range(self.config["api_retry_attempts"]):
+            self._record("restarting", restart_attempt=attempt + 1)
+            try:
+                await self._request("POST", f"/pods/{self.pod_id}/restart")
+            except (httpx.TransportError, httpx.HTTPStatusError) as error:
+                if (
+                    isinstance(error, httpx.HTTPStatusError)
+                    and error.response.status_code != 429
+                    and error.response.status_code < 500
+                ):
+                    raise
+                self._record("restart_response_failed", restart_error=repr(error))
+                # A failed response may follow an accepted restart. Allow the full
+                # restoration window before considering another restart request.
+                try:
+                    await self._wait_ready(boot.strip())
+                    return self
+                except TimeoutError:
+                    if attempt + 1 == self.config["api_retry_attempts"]:
+                        raise error
+            else:
+                await self._wait_ready(boot.strip())
+                return self
+        return self

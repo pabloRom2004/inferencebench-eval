@@ -18,6 +18,8 @@ task:
     system_prompt: token_budget
     # Leaderboard strict rules: no third-party pre-quantized checkpoints, no harness edits.
     strict_prompt: true
+    # Require an automated search tool during hyperparameter tuning.
+    automated_tuning: false
     request_limit: 10
     quality_samples: 500
     quality_seed: 248
@@ -42,9 +44,13 @@ task:
         judge_cli_version: 2.1.114
 
 solver:
-  # Maintained ReAct harness; claude_code.yaml and codex_cli.yaml select the native CLIs through cli_agent.
-  solver: inferencebench/react_agent
+  # Select react or an Inspect SWE CLI without adding another run-config file.
+  solver: inferencebench/default_agent
   args:
+    harness: react
+    harness_args: null
+    # Used by the CLI harnesses; native CLI options belong in harness_args.
+    cli_poll_timeout: 7200
     tools: [bash, python, web_search]
     web_search_args:
       backend: duckduckgo

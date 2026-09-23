@@ -2,7 +2,13 @@ from typing import Any
 
 from inspect_ai.dataset import MemoryDataset, Sample
 
-from inferencebench.prompts import STRICT_RULES, select_prompt
+from inferencebench.prompts import (
+    AUTOMATED_TUNING,
+    STRICT_RULES,
+    TIMED_BUDGET_DESCRIPTION,
+    TOKEN_BUDGET_DESCRIPTION,
+    select_prompt,
+)
 from inferencebench.vendored import UPSTREAM, scenario_directories
 
 # Scenario names and missions come from the vendored task directories, as upstream's prompt builder reads them.
@@ -24,7 +30,14 @@ def num_hours_text(seconds: int) -> str:
 def render_prompt(template: str, options: dict[str, Any], scenario: str) -> str:
     """Fill the placeholders exactly as upstream's get_prompt.py does, with its default endpoint and metrics path."""
     record = SCENARIOS[scenario]
+    timed = options["agent_seconds"] is not None
+    budget_description = (
+        TIMED_BUDGET_DESCRIPTION.prompt.format(num_hours=num_hours_text(options["agent_seconds"]))
+        if timed else TOKEN_BUDGET_DESCRIPTION.prompt
+    )
     values = {
+        "budget_description": budget_description,
+        "budget_name": "optimization budget" if timed else "token budget",
         "model": options["base_model"],
         "scenario": record["benchmark"],
         "mission": record["mission"],
@@ -77,6 +90,8 @@ def get_inference_dataset(
             line_end = prompt.index("\n", prompt.index(anchor)) + 1
             prompt = prompt[:line_end] + STRICT_RULES.prompt + "\n" + prompt[line_end:]
         prompt = render_prompt(prompt, options, scenario)
+        if options["automated_tuning"]:
+            prompt += "\n\n## Automated hyperparameter tuning\n\n" + AUTOMATED_TUNING.prompt
 
         for dev_seed, eval_seed in seed_pairs:
             samples.append(

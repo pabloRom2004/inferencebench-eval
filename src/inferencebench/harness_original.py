@@ -6,10 +6,9 @@ from inspect_ai.model import ChatMessageUser
 from inspect_ai.solver import Solver, solver
 from inspect_ai.util import store
 
-from inferencebench.cli import file_cli_prompts
+from inferencebench.harness_default import file_cli_prompts, with_deadline
 from inferencebench.prompts import CONTINUE_PROMPT, NUDGE_PROMPT, ORIGINAL_CLI_CONTEXT
-from inferencebench.reminders import with_deadline
-from inferencebench.run_config import load_config
+from inferencebench.utils.run_config import load_config
 
 ORIGINAL_AGENT_ARGS = load_config("run_configs/original.yaml")["solver"]["args"]
 

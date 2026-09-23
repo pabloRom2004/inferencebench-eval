@@ -16,12 +16,12 @@ from inspect_ai.scorer import SampleScore, Score
 from inspect_ai.solver import generate, solver
 from inspect_ai.util import ExecResult, store
 
-from inferencebench import inference_bench, original_agent, react_agent
+from inferencebench import default_agent, inference_bench, original_agent, react_agent
 from inferencebench.metrics import aggregate_speedup, complete_mean, performance
-from inferencebench.prompts import PROMPTS
-from inferencebench.run_config import load_config
+from inferencebench.prompts import AUTOMATED_TUNING, PROMPTS
 from inferencebench.scorers import parse_judgment
 from inferencebench.tools import web_search
+from inferencebench.utils.run_config import load_config
 
 TASK = importlib.import_module("inferencebench.task")
 SCORERS = importlib.import_module("inferencebench.scorers")
@@ -162,6 +162,44 @@ def judge_model(text="no contamination detected\nonly allowed use detected"):
             ModelOutput.from_content("mockllm/judge", text) for _ in range(6)
         ],
     )
+
+
+@pytest.mark.parametrize("automated_tuning", [False, True])
+def test_tuning_instruction_and_deadline_reach_model(local_task, automated_tuning):
+    """Deliver the selected tuning instruction and two-hour budget through the real task and scorer."""
+    _, env = local_task
+    task = inference_bench(
+        agent_seconds=7200,
+        automated_tuning=automated_tuning,
+        quality_reference_backend="vllm",
+        gpu_provider="runpod",
+    )
+    task.sandbox = None
+    task.solver = default_agent(nudge_prompt=False, token_budget_reminder=False)
+    requests = []
+
+    def output(messages, tools, tool_choice, config):
+        """Observe the actual subject input and finish without making cloud or provider calls."""
+        requests.append(messages[0].text)
+        return ModelOutput.from_content("mockllm/tuning", "Finished")
+
+    [log] = inspect_eval(
+        task,
+        model=get_model("mockllm/tuning", custom_outputs=output),
+        model_roles={"integrity": judge_model()},
+        display="none",
+        log_dir="logs",
+    )
+    assert log.status == "success", log.error
+    assert len(requests) == 1
+    assert (AUTOMATED_TUNING.prompt in requests[0]) is automated_tuning
+    assert "2 hours of wall-clock optimization time" in requests[0]
+    assert "no wall-clock optimization limit" not in requests[0]
+    assert "{budget_" not in requests[0]
+    [sample] = log.samples
+    assert sample.metadata["automated_tuning"] is automated_tuning
+    assert sample.scores["inference_speedup"].value == {"speedup": 2.0}
+    env.terminate.assert_awaited_once()
 
 
 def test_config_dataset_and_provenance():
@@ -385,7 +423,7 @@ def test_original_dispatches_configured_cli(
     monkeypatch.setattr(HARNESS.inspect_swe, harness, factory)
     task, env = local_task
     env.write_file = AsyncMock()
-    monkeypatch.setattr(importlib.import_module("inferencebench.cli"), "sandbox", lambda: env)
+    monkeypatch.setattr(importlib.import_module("inferencebench.harness_default"), "sandbox", lambda: env)
     task.dataset[0].metadata["agent_seconds"] = seconds
     task.solver = original_agent(
         harness=harness, version=version, continue_until_deadline=continue_until_deadline
@@ -427,8 +465,8 @@ def test_cli_harness_overrides(monkeypatch, config_name, harness):
     cli = importlib.import_module("inspect_ai._cli.eval")
     observed = {}
     if config_name == "default":
-        name = f"inspect_swe/{harness}"
-        args = {"cwd": "/home/agent/task", "user": "root", "version": "auto"}
+        name = "inferencebench/default_agent"
+        args = {"harness": harness, "harness_args": {"version": "auto"}}
     else:
         name = "inferencebench/original_agent"
         args = {"harness": harness, "version": "auto"}
@@ -446,7 +484,7 @@ def test_cli_harness_overrides(monkeypatch, config_name, harness):
         [
             "eval", "--run-config", f"src/inferencebench/run_configs/{config_name}.yaml",
             "--model", "mockllm/subject", "--solver", name,
-            *[part for key, value in args.items() for part in ("-S", f"{key}={value}")],
+            *[part for key, value in args.items() for part in ("-S", f"{key}={json.dumps(value)}")],
         ],
     )
     assert result.exit_code == 0, result.output or repr(result.exception)
@@ -683,7 +721,7 @@ def test_prompt_selection_contract():
 
 async def test_modal_filesystem_adapter():
     """Use the supported Modal filesystem methods for writes, reads, and parent creation."""
-    from inferencebench.modal_sandbox import InferenceSandbox
+    from inferencebench.environment import InferenceSandbox
 
     filesystem = SimpleNamespace(
         make_directory=SimpleNamespace(aio=AsyncMock()),
@@ -1373,9 +1411,9 @@ def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path, fai
                 from asyncssh.misc import async_context_manager
                 from inspect_ai.util._sandbox.events import SandboxEnvironmentProxy
 
-                from inferencebench.runpod_sandbox import RunPodSandbox
+                from inferencebench.environment import RunPodSandbox
 
-                config = load_config("runpod.yaml")
+                config = load_config("assets/sandboxes/runpod.yaml")
                 config["poll_interval_seconds"] = 0
                 provider = RunPodSandbox(config)
                 @async_context_manager
@@ -1421,7 +1459,7 @@ def test_strict_prompt_toggle(config_defaults, strict):
 
 async def test_deadline_absorbs_failures_after_expiry(monkeypatch):
     """Treat any failure surfacing once the budget has expired as the budget ending, and re-raise earlier failures."""
-    from inferencebench import reminders
+    from inferencebench import harness_default as reminders
 
     state = SimpleNamespace(metadata={})
     end = time.time() + 0.2

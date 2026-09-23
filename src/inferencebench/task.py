@@ -10,8 +10,8 @@ from inspect_ai.util import SandboxEnvironmentSpec, registry_create
 
 from inferencebench.dataset import get_inference_dataset
 from inferencebench.environment import prepare_environment, retain_failed_submission
-from inferencebench.run_config import load_config
 from inferencebench.scorers import scorers_from_spec
+from inferencebench.utils.run_config import load_config
 
 CONFIG = load_config()
 DEFAULT_TASK_ARGS = CONFIG["task"]["args"]
@@ -49,6 +49,7 @@ def inference_bench(
     # Prompt and scoring.
     system_prompt:           str = DEFAULT_TASK_ARGS["system_prompt"],
     strict_prompt:           bool = DEFAULT_TASK_ARGS["strict_prompt"],
+    automated_tuning:        bool = DEFAULT_TASK_ARGS["automated_tuning"],
     scorer:                  dict[str, Any] = DEFAULT_TASK_ARGS["scorer"],
 ) -> Task:
     """Optimize the configured base model's inference for four workloads on one H100 using the original evaluator."""
@@ -74,6 +75,8 @@ def inference_bench(
         raise ValueError("quality_seed must be a nonnegative integer")
     if quality_reference_backend not in {"transformers", "vllm"}:
         raise ValueError("quality_reference_backend must be transformers or vllm")
+    if type(automated_tuning) is not bool:
+        raise ValueError("automated_tuning must be a boolean")
     if type(strict_prompt) is not bool:
         raise ValueError("strict_prompt must be a boolean")
     if baseline_dtype not in {"float16", "bfloat16", "float32"}:
@@ -96,7 +99,7 @@ def inference_bench(
         scorer=scorers_from_spec(scorer),
         sandbox=SandboxEnvironmentSpec(
             f"inferencebench_{gpu_provider}",
-            gpu_config or str(Path(__file__).parent / ("compose.yaml" if gpu_provider == "modal" else "runpod.yaml")),
+            gpu_config or str(Path(__file__).parent / ("assets/sandboxes/compose.yaml" if gpu_provider == "modal" else "assets/sandboxes/runpod.yaml")),
         ),
         config=GenerateConfig(**config["generate_config"]),
         epochs=Epochs(config["eval_config"]["epochs"], config["eval_config"]["epochs_reducer"]),

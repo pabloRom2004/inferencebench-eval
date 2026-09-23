@@ -6,14 +6,14 @@ You are tasked with deploying and optimizing an OpenAI-compatible inference serv
 
 * Scenario: {scenario}
 * Primary Objective: {mission}
-* Budget: Use the full token budget shown in the live reminders; there is no wall-clock optimization limit.
+* Budget: {budget_description}
 * GPU: NVIDIA H100 80GB HBM3 (1x)
 * RAM: 180 GB
 
 ## 2. Execution Protocol 
-Explore, implement, and verify improvements autonomously throughout your token budget.
+Explore, implement, and verify improvements autonomously throughout your {budget_name}.
 
-- Use evaluate.py --json-output-file {metrics_path} as your primary feedback mechanism. Your goal is to continuously improve the scores reported by this script until the token budget is exhausted.
+- Use evaluate.py --json-output-file {metrics_path} as your primary feedback mechanism. Your goal is to continuously improve the scores reported by this script until the {budget_name} is exhausted.
 - During development, run fast smoke tests first with evaluate.py --quick --json-output-file {metrics_path}; use full evaluation runs for final confirmation/comparison.
 - You are expected to make changes, measure their impact, and iterate. Do not settle for a default configuration if optimization is possible.
 - Use ./start_server.sh as the canonical and only entrypoint to set up and run your server; do not rely on any alternative launcher file or direct ad-hoc Python/module invocation for final operation.
@@ -47,4 +47,4 @@ At the end of the session, the following state must be preserved in the current 
 
 IMPORTANT: After your session ends, the evaluation harness will **kill your running server** and **re-execute `start_server.sh` in a fresh container via a supervised launcher** to produce the final score. Do not rely on state that only exists while your session is active, and do not rely on detached background daemons surviving launcher exit.
 
-Reminder: A functional server is a prerequisite, not the final deliverable. Your success is measured by the delta between the initial baseline deployment and your final optimized metrics. Continuously drive up the evaluation scores until the token budget is exhausted.
+Reminder: A functional server is a prerequisite, not the final deliverable. Your success is measured by the delta between the initial baseline deployment and your final optimized metrics. Continuously drive up the evaluation scores until the {budget_name} is exhausted.

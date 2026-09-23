@@ -5,12 +5,17 @@ import shlex
 import tempfile
 import time
 import uuid
+from abc import abstractmethod
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from http import HTTPStatus
 from pathlib import Path, PurePosixPath
+from typing import Any, ClassVar, Literal, cast, overload
 
 import anyio
 import asyncssh
 import httpx
+import yaml
 from inspect_ai.util import (
     ExecResult,
     OutputLimitExceededError,
@@ -18,11 +23,7 @@ from inspect_ai.util import (
     SandboxEnvironment,
     SandboxEnvironmentLimits,
     SandboxUnavailableError,
-    sandboxenv,
 )
-
-from inferencebench.prompts import ASSETS
-from inferencebench.run_config import load_config
 
 # Slowest link the transfer allowance assumes; larger payloads get proportionally more time.
 TRANSFER_FLOOR_BYTES_PER_SECOND = 256 * 1024
@@ -35,31 +36,49 @@ def _error_detail(error: BaseException) -> str:
     return repr(error)
 
 
-@sandboxenv(name="inferencebench_runpod")
 class RunPodSandbox(SandboxEnvironment):
     """Run each sample in an owned RunPod pod, using authenticated SSH for commands and files."""
 
-    def __init__(self, config: dict):
+    default_config: ClassVar[Path]
+    working_dir: ClassVar[str]
+    environment_file: ClassVar[str]
+    boot_file: ClassVar[str]
+    name_prefix: ClassVar[str]
+    ssh_public_key_env: ClassVar[str]
+    ssh_host_key_env: ClassVar[str]
+
+    @staticmethod
+    @abstractmethod
+    def _configuration(path: str | None) -> dict[str, Any]:
+        """Resolve and validate the task's provider configuration before allocation."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def _startup_command(self) -> str:
+        """Return the task's boot script, including its authenticated SSH setup."""
+        raise NotImplementedError
+
+    def __init__(self, config: dict[str, Any]) -> None:
         """Generate per-pod SSH keys and defer resource creation to sample initialization."""
         super().__init__()
         # Inspect already records tools and results; SSH handshake chatter obscures them.
         asyncssh.set_log_level("WARNING")
         self.config = config
-        self.pod_id = None
-        self.host = None
-        self.port = None
+        self.pod_id: str | None = None
+        self.host: str | None = None
+        self.port: int | None = None
         self.key = asyncssh.generate_private_key("ssh-ed25519")
         self.host_key = asyncssh.generate_private_key("ssh-ed25519")
-        self.name = "inferencebench-" + uuid.uuid4().hex
+        self.name = self.name_prefix + uuid.uuid4().hex
         self.folder = Path("run-artifacts/runpod") / self.name
-        self.ssh_folder = None
+        self.ssh_folder: tempfile.TemporaryDirectory[str] | None = None
 
     @property
-    def resource_id(self) -> str:
+    def resource_id(self) -> str | None:
         """Identify the owned pod without exposing any credential."""
         return self.pod_id
 
-    async def _request(self, method: str, path: str, **kwargs):
+    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         """Call the RunPod REST API from the host without retrying resource-creation requests."""
         key = os.environ["RUNPOD_API_KEY"]
         attempts = (
@@ -76,22 +95,26 @@ class RunPodSandbox(SandboxEnvironment):
                         headers={"Authorization": f"Bearer {key}"},
                         **kwargs,
                     )
-                    if method == "DELETE" and response.status_code == 404:
+                    if (
+                        method == "DELETE"
+                        and response.status_code == HTTPStatus.NOT_FOUND
+                    ):
                         return None
                     response.raise_for_status()
                     return response.json() if response.content else None
                 except (httpx.TransportError, httpx.HTTPStatusError) as error:
                     if (
                         isinstance(error, httpx.HTTPStatusError)
-                        and error.response.status_code != 429
-                        and error.response.status_code < 500
+                        and error.response.status_code != HTTPStatus.TOO_MANY_REQUESTS
+                        and error.response.status_code
+                        < HTTPStatus.INTERNAL_SERVER_ERROR
                     ):
                         raise
                     if attempt + 1 == attempts:
                         raise
                     await asyncio.sleep(self.config["poll_interval_seconds"])
 
-    def _record(self, status: str, **details) -> None:
+    def _record(self, status: str, **details: Any) -> None:
         """Keep resource IDs and failures recoverable after a host interruption without storing keys."""
         self.folder.mkdir(parents=True, exist_ok=True)
         path = self.folder / "pod.json"
@@ -100,13 +123,13 @@ class RunPodSandbox(SandboxEnvironment):
         path.write_text(json.dumps(record, indent=2))
 
     @asynccontextmanager
-    async def _connect(self):
+    async def _connect(self) -> AsyncIterator[asyncssh.SSHClientConnection]:
         """Retry connection failures before sending any command; never replay remote work."""
         for attempt in range(self.config["api_retry_attempts"]):
             try:
                 connection = await asyncssh.connect(
-                    self.host,
-                    port=self.port,
+                    cast(str, self.host),
+                    port=cast(int, self.port),
                     username="root",
                     client_keys=[self.key],
                     agent_path=None,
@@ -130,7 +153,7 @@ class RunPodSandbox(SandboxEnvironment):
         if not self.host or not self.port:
             raise ConnectionError("RunPod SSH is not ready")
         if self.ssh_folder is None or not Path(self.ssh_folder.name).is_dir():
-            self.ssh_folder = tempfile.TemporaryDirectory(prefix="inferencebench-ssh-")
+            self.ssh_folder = tempfile.TemporaryDirectory(prefix="inspect-runpod-ssh-")
         folder = Path(self.ssh_folder.name)
         key = folder / "id_ed25519"
         key.write_bytes(self.key.export_private_key())
@@ -173,7 +196,7 @@ class RunPodSandbox(SandboxEnvironment):
             if self.host and self.port:
                 try:
                     result = await self.exec(
-                        ["cat", "/run/inferencebench-boot-id"],
+                        ["cat", self.boot_file],
                         timeout=self.config["api_timeout_seconds"],
                     )
                     if (
@@ -190,75 +213,14 @@ class RunPodSandbox(SandboxEnvironment):
         raise TimeoutError(f"RunPod {self.pod_id} did not become ready")
 
     @classmethod
-    async def task_init(cls, task_name, config) -> None:
+    async def task_init(cls, task_name: str, config: Any) -> None:
         """Validate the image and credentials before allocating a billable pod."""
         cls._configuration(config)
 
-    def _startup_command(self) -> str:
-        """Install the Dockerfile's shared environment on first boot, or restore it after restart."""
-        dockerfile = (ASSETS.parent / "Dockerfile").read_text().replace("\\\n", "")
-        exports = [
-            "export " + line[4:]
-            for line in dockerfile.splitlines()
-            if line.startswith("ENV ")
-        ]
-        script = "set -e\n" + "\n".join(exports) + "\n"
-        if self.config["bootstrap"]:
-            script += "if [ ! -f /workspace/.inferencebench/ready ]; then\n"
-            script += (
-                "bash -c "
-                + shlex.quote((ASSETS / "scripts" / "setup_environment.sh").read_text())
-                + "\n"
-            )
-            script += "elif ! command -v rsync >/dev/null || ! command -v sshd >/dev/null; then\n"
-            script += "apt-get update && apt-get install -y rsync openssh-server python3\nfi\n"
-        script += "mkdir -p /opt\nprintf %s " + shlex.quote(
-            (ASSETS / "scripts" / "runpod_start.sh").read_text()
-        )
-        script += " > /opt/runpod_start.sh\nexec bash /opt/runpod_start.sh"
-        return script
-
-    @staticmethod
-    def _configuration(path) -> dict:
-        """Resolve the complete provider YAML and reject missing prerequisites before a paid API call."""
-        config = load_config(path or "runpod.yaml")
-        # Existing complete provider configs predate the transport keepalive controls.
-        defaults = load_config("runpod.yaml")
-        for name in ["ssh_keepalive_interval_seconds", "ssh_keepalive_count_max"]:
-            config.setdefault(name, defaults[name])
-        config["pod"]["imageName"] = (
-            os.environ.get("RUNPOD_IMAGE") or config["pod"]["imageName"]
-        )
-        if not os.environ.get("RUNPOD_API_KEY") or not config["pod"]["imageName"]:
-            raise ValueError(
-                "RunPod requires RUNPOD_API_KEY and an image in RUNPOD_IMAGE or pod.imageName"
-            )
-        if type(config["bootstrap"]) is not bool:
-            raise ValueError("bootstrap must be true or false")
-        if (
-            config["pod"]["volumeMountPath"] != "/workspace"
-            or config["pod"]["volumeInGb"] <= 0
-        ):
-            raise ValueError(
-                "RunPod requires a persistent volume at /workspace for the scoring restart"
-            )
-        for name in [
-            "api_timeout_seconds",
-            "api_retry_attempts",
-            "ssh_keepalive_interval_seconds",
-            "ssh_keepalive_count_max",
-            "startup_timeout_seconds",
-            "snapshot_timeout_seconds",
-            "poll_interval_seconds",
-            "create_retry_attempts",
-            "create_retry_interval_seconds",
-        ]:
-            if type(config[name]) is not int or config[name] <= 0:
-                raise ValueError(f"{name} must be a positive integer")
-        return config
-
     @classmethod
-    async def sample_init(cls, task_name, config, metadata):
+    async def sample_init(
+        cls, task_name: str, config: Any, metadata: dict[str, Any]
+    ) -> dict[str, SandboxEnvironment]:
         """Create one pod per sample and release it if provisioning or SSH setup fails."""
         env = cls(cls._configuration(config))
         env._record("creating")
@@ -268,8 +230,8 @@ class RunPodSandbox(SandboxEnvironment):
             "dockerEntrypoint": ["bash", "-c"],
             "dockerStartCmd": [env._startup_command()],
             "env": {
-                "INFERENCEBENCH_SSH_PUBLIC_KEY": env.key.export_public_key().decode(),
-                "INFERENCEBENCH_SSH_HOST_KEY": env.host_key.export_private_key().decode(),
+                env.ssh_public_key_env: env.key.export_public_key().decode(),
+                env.ssh_host_key_env: env.host_key.export_private_key().decode(),
             },
         }
         try:
@@ -301,31 +263,44 @@ class RunPodSandbox(SandboxEnvironment):
                     await env.terminate()
             raise
 
-    async def _create_pod(self, payload: dict) -> dict:
+    async def _create_pod(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Request a pod, waiting out capacity and server failures that RunPod reports as 5xx."""
         attempts = self.config["create_retry_attempts"]
         for attempt in range(1, attempts + 1):
             try:
-                return await self._request("POST", "/pods", json=payload)
+                return cast(
+                    dict[str, Any], await self._request("POST", "/pods", json=payload)
+                )
             except httpx.HTTPStatusError as error:
                 status = error.response.status_code
-                if (status != 429 and status < 500) or attempt == attempts:
+                if (
+                    status != HTTPStatus.TOO_MANY_REQUESTS
+                    and status < HTTPStatus.INTERNAL_SERVER_ERROR
+                ) or attempt == attempts:
                     raise
                 # A rejected request must never be duplicated if it allocated after all.
                 for pod in await self._request("GET", "/pods"):
                     if pod["name"] == self.name:
-                        return pod
+                        return cast(dict[str, Any], pod)
                 self._record(
                     "create_retry", attempt=attempt, create_error=_error_detail(error)
                 )
                 await asyncio.sleep(self.config["create_retry_interval_seconds"])
 
+        raise RuntimeError("RunPod create attempts exhausted")
+
     @classmethod
-    async def sample_cleanup(cls, task_name, config, environments, interrupted) -> None:
+    async def sample_cleanup(
+        cls,
+        task_name: str,
+        config: Any,
+        environments: dict[str, SandboxEnvironment],
+        interrupted: bool,
+    ) -> None:
         """Delete owned pods, including their attached volumes, on completion or interruption."""
         with anyio.CancelScope(shield=True):
             for env in environments.values():
-                await env.terminate()
+                await cast(RunPodSandbox, env).terminate()
 
     @classmethod
     async def cli_cleanup(cls, id: str | None) -> None:
@@ -334,7 +309,7 @@ class RunPodSandbox(SandboxEnvironment):
             raise ValueError(
                 "Supply the pod ID recorded in run-artifacts/runpod; bulk deletion is not supported"
             )
-        env = cls(load_config("runpod.yaml"))
+        env = cls(yaml.safe_load(cls.default_config.read_text()))
         env.pod_id = id
         await env.terminate()
 
@@ -356,87 +331,56 @@ class RunPodSandbox(SandboxEnvironment):
                 self.host = None
                 self.port = None
 
-    async def restart(self, config_file: str | None) -> "RunPodSandbox":
-        """Snapshot the installed filesystem to the volume and reboot the pod before grading."""
-        boot = await self.read_file("/run/inferencebench-boot-id")
-        await self.write_file(
-            "/opt/runpod_start.sh", (ASSETS / "scripts" / "runpod_start.sh").read_text()
-        )
-        result = await self.exec(
-            ["bash", "/opt/runpod_start.sh", "snapshot"],
-            timeout=self.config["snapshot_timeout_seconds"],
-        )
-        if not result.success:
-            raise RuntimeError(f"RunPod filesystem snapshot failed: {result.stderr}")
-        for attempt in range(self.config["api_retry_attempts"]):
-            self._record("restarting", restart_attempt=attempt + 1)
-            try:
-                await self._request("POST", f"/pods/{self.pod_id}/restart")
-            except (httpx.TransportError, httpx.HTTPStatusError) as error:
-                if (
-                    isinstance(error, httpx.HTTPStatusError)
-                    and error.response.status_code != 429
-                    and error.response.status_code < 500
-                ):
-                    raise
-                self._record("restart_response_failed", restart_error=repr(error))
-                # A failed response may follow an accepted restart. Allow the full
-                # restoration window before considering another restart request.
-                try:
-                    await self._wait_ready(boot.strip())
-                    return self
-                except TimeoutError:
-                    if attempt + 1 == self.config["api_retry_attempts"]:
-                        raise error
-            else:
-                await self._wait_ready(boot.strip())
-                return self
-        return self
-
     async def exec(
         self,
-        cmd,
-        input=None,
-        cwd=None,
-        env=None,
-        user=None,
-        timeout=None,
-        timeout_retry=True,
-        concurrency=True,
+        cmd: list[str],
+        input: str | bytes | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        user: str | None = None,
+        timeout: int | None = None,
+        timeout_retry: bool = True,
+        concurrency: bool = True,
     ) -> ExecResult[str]:
         """Execute quoted commands with bounded output and a remote process-group timeout."""
         command = list(cmd)
         if timeout is not None:
             command = ["timeout", "--kill-after=10", str(timeout), *command]
-        script = "source /etc/inferencebench-env.sh; cd " + shlex.quote(
-            str(PurePosixPath("/home/agent/task") / (cwd or "."))
+        script = (
+            "source "
+            + shlex.quote(self.environment_file)
+            + "; cd "
+            + shlex.quote(str(PurePosixPath(self.working_dir) / (cwd or ".")))
         )
         script += " && exec " + shlex.join(
             ["env", *[f"{key}={value}" for key, value in (env or {}).items()], *command]
         )
         command = ["bash", "-c", script]
         if user not in (None, "root", "0"):
-            command = ["runuser", "-u", user, "--", *command]
+            command = ["runuser", "-u", cast(str, user), "--", *command]
 
         # Background descendants can retain SSH pipes after the command exits.
-        marker = "\nINFERENCEBENCH_EXIT_" + uuid.uuid4().hex + ":"
-        script = shlex.join(command) + "; inferencebench_status=$?; "
+        marker = "\nINSPECT_EXIT_" + uuid.uuid4().hex + ":"
+        script = shlex.join(command) + "; inspect_status=$?; "
         # Coreutils buffers each record into one pipe write; bash printf can interleave
         # its marker, status, and newline with a noisy background descendant.
         for destination in ["", " >&2"]:
             script += (
-                "/usr/bin/printf '%s%d\\n' " + shlex.quote(marker)
-                + ' "$inferencebench_status"' + destination + "; "
+                "/usr/bin/printf '%s%d\\n' "
+                + shlex.quote(marker)
+                + ' "$inspect_status"'
+                + destination
+                + "; "
             )
-        command = ["bash", "-c", script + 'exit "$inferencebench_status"']
+        command = ["bash", "-c", script + 'exit "$inspect_status"']
         drainers = []
 
-        async def discard(stream):
+        async def discard(stream: asyncssh.SSHReader[bytes]) -> None:
             """Keep channel flow control moving after this stream's completion marker."""
             while await stream.read(65536):
                 pass
 
-        async def read_tail(stream):
+        async def read_tail(stream: asyncssh.SSHReader[bytes]) -> tuple[str, int]:
             """Drain through the command's completion record without waiting for descendant-held pipes."""
             data = bytearray()
             while chunk := await stream.read(65536):
@@ -445,11 +389,17 @@ class RunPodSandbox(SandboxEnvironment):
                 if found and b"\n" in after:
                     drainers.append(asyncio.create_task(discard(stream)))
                     return (
-                        before[-SandboxEnvironmentLimits.MAX_EXEC_OUTPUT_SIZE:].decode(errors="replace"),
+                        before[-SandboxEnvironmentLimits.MAX_EXEC_OUTPUT_SIZE :].decode(
+                            errors="replace"
+                        ),
                         int(after.split(b"\n", 1)[0]),
                     )
-                del data[: -(SandboxEnvironmentLimits.MAX_EXEC_OUTPUT_SIZE + len(marker) + 4)]
-            raise SandboxUnavailableError("RunPod SSH closed without a command completion record")
+                del data[
+                    : -(SandboxEnvironmentLimits.MAX_EXEC_OUTPUT_SIZE + len(marker) + 4)
+                ]
+            raise SandboxUnavailableError(
+                "RunPod SSH closed without a command completion record"
+            )
 
         try:
             async with self._connect() as connection:
@@ -473,12 +423,12 @@ class RunPodSandbox(SandboxEnvironment):
                         await process.wait_closed()
                     returncode = stdout[1]
                     if returncode != stderr[1]:
-                        raise SandboxUnavailableError("RunPod SSH returned inconsistent command completion records")
+                        raise SandboxUnavailableError(
+                            "RunPod SSH returned inconsistent command completion records"
+                        )
                     if timeout is not None and returncode in (124, 137):
                         raise TimeoutError("RunPod command exceeded its timeout")
-                    return ExecResult(
-                        returncode == 0, returncode, stdout[0], stderr[0]
-                    )
+                    return ExecResult(returncode == 0, returncode, stdout[0], stderr[0])
         except TimeoutError:
             raise
         except (asyncssh.Error, OSError) as error:
@@ -492,10 +442,15 @@ class RunPodSandbox(SandboxEnvironment):
 
     def transfer_allowance(self, transfer_bytes: int) -> float:
         """Allow the base API timeout plus the time a slow link needs to move the payload."""
-        return self.config["api_timeout_seconds"] + transfer_bytes / TRANSFER_FLOOR_BYTES_PER_SECOND
+        return (
+            float(self.config["api_timeout_seconds"])
+            + transfer_bytes / TRANSFER_FLOOR_BYTES_PER_SECOND
+        )
 
     @asynccontextmanager
-    async def _sftp(self, transfer_bytes: int = 0):
+    async def _sftp(
+        self, transfer_bytes: int = 0
+    ) -> AsyncIterator[asyncssh.SFTPClient]:
         """Open an authenticated file channel with a time allowance scaled to the transfer size."""
         allowance = self.transfer_allowance(transfer_bytes)
         try:
@@ -517,22 +472,29 @@ class RunPodSandbox(SandboxEnvironment):
 
     async def write_file(self, file: str, contents: str | bytes) -> None:
         """Write binary or UTF-8 content through SFTP, creating its parent directories."""
-        path = str(PurePosixPath("/home/agent/task") / file)
+        path = str(PurePosixPath(self.working_dir) / file)
         data = contents.encode() if isinstance(contents, str) else contents
         async with self._sftp(len(data)) as sftp:
             await sftp.makedirs(str(PurePosixPath(path).parent), exist_ok=True)
             async with sftp.open(path, "wb") as remote:
                 await remote.write(data)
 
+    @overload
+    async def read_file(self, file: str, text: Literal[True] = True) -> str: ...
+
+    @overload
+    async def read_file(self, file: str, text: Literal[False]) -> bytes: ...
+
     async def read_file(self, file: str, text: bool = True) -> str | bytes:
         """Read a file with Inspect's size limit, raising rather than returning truncated data."""
-        path = str(PurePosixPath("/home/agent/task") / file)
+        path = str(PurePosixPath(self.working_dir) / file)
         async with self._sftp(SandboxEnvironmentLimits.MAX_READ_FILE_SIZE) as sftp:
             if (await sftp.stat(path)).type == asyncssh.FILEXFER_TYPE_DIRECTORY:
                 raise IsADirectoryError(path)
             async with sftp.open(path, "rb") as remote:
-                data = await remote.read(
-                    SandboxEnvironmentLimits.MAX_READ_FILE_SIZE + 1
+                data = cast(
+                    bytes,
+                    await remote.read(SandboxEnvironmentLimits.MAX_READ_FILE_SIZE + 1),
                 )
         if len(data) > SandboxEnvironmentLimits.MAX_READ_FILE_SIZE:
             raise OutputLimitExceededError(

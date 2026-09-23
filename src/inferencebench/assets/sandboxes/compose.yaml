@@ -1,6 +1,6 @@
 services:
   default:
-    build: .
+    build: ../..
     working_dir: /home/agent/task
     cpus: 16
     mem_limit: 180g

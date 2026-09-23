@@ -1,14 +1,9 @@
 from pathlib import PurePosixPath
 
-import modal
-from inspect_ai.util import sandboxenv
 from inspect_sandboxes.modal._modal import ModalSandboxEnvironment
 
-from inferencebench.run_config import load_config
 
-
-@sandboxenv(name="inferencebench_modal")
-class InferenceSandbox(ModalSandboxEnvironment):
+class FileSystemModalSandbox(ModalSandboxEnvironment):
     """Use Modal's current filesystem API until inspect-sandboxes migrates its retired FileIO calls."""
 
     @property
@@ -27,30 +22,6 @@ class InferenceSandbox(ModalSandboxEnvironment):
     async def terminate(self) -> None:
         """Release the sandbox allocated for this attempt."""
         await self.sandbox.terminate.aio(wait=True)
-
-    async def restart(self, config_file: str | None) -> "InferenceSandbox":
-        """Preserve the submitted filesystem and allocate a fresh H100 without its running processes, keeping this registered object."""
-        image = await self.sandbox.snapshot_filesystem.aio(timeout=55)
-        await self.terminate()
-        config = load_config(config_file or "compose.yaml")
-        resources = config["services"]["default"]
-        app = await modal.App.lookup.aio(
-            "inferencebench-scoring", create_if_missing=True
-        )
-        remote = await modal.Sandbox.create.aio(
-            "sleep",
-            "infinity",
-            app=app,
-            image=image,
-            gpu=config["x-modal"]["gpu"],
-            cpu=resources["cpus"],
-            memory=int(resources["mem_limit"].removesuffix("g")) * 1024,
-            timeout=config["x-modal"]["timeout"],
-            workdir=resources["working_dir"],
-        )
-        # Inspect SWE resolves the sample's sandbox by name, so the judge must find the replacement here.
-        self.sandbox = remote
-        return self
 
     async def _absolute_file(self, file: str) -> str:
         """Resolve relative Inspect paths against the sandbox's configured working directory."""

@@ -36,8 +36,8 @@ scenario definitions are read from that copy rather than re-typed.
    It must serve the supplied checkpoint locally through the required OpenAI
    endpoints, improve the scenario metric, and retain quality.
 5. **Run the selected harness.** `harness_default.py` runs native Inspect ReAct;
-   `cli.py` runs native Inspect SWE CLIs. Both share reminders and continuation
-   through `reminders.py`. Claude Code runs inside the GPU sandbox and calls
+   `harness_default.py` runs native Inspect SWE CLIs. Both share reminders and continuation
+   through `harness_default.py`. Claude Code runs inside the GPU sandbox and calls
    GLM through Inspect's bridge. The provider key stays with the controller.
    Claude Code reads task and continuation instructions from files, preserving
    their text while keeping server names out of its process arguments. This

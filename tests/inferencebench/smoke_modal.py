@@ -8,7 +8,7 @@ from inspect_ai import eval as inspect_eval
 from inspect_ai.model import ModelOutput, get_model
 
 from inferencebench import inference_bench, original_agent, react_agent
-from inferencebench.run_config import load_config
+from inferencebench.utils.run_config import load_config
 
 SCRIPT = """nvidia-smi --query-gpu=name,memory.total --format=csv
 id

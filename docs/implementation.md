@@ -34,33 +34,25 @@ uv run inspect eval --run-config src/inferencebench/run_configs/original.yaml \
   -T scenarios=A -T 'seed_pairs=[[21,1337]]'
 ```
 
-Both configs support [Inspect SWE](https://meridianlabs-ai.github.io/inspect_swe/) harnesses. `claude_code.yaml` and `codex_cli.yaml` are the maintained workload with `inferencebench/cli_agent` and the verified native settings (Claude Code 2.1.267, Codex 0.154.0, a 7200-second remote poll timeout, Codex's native search disabled in favour of the bridged tool). For another native CLI, replace the solver:
+Both configs support [Inspect SWE](https://meridianlabs-ai.github.io/inspect_swe/) harnesses. The maintained `inferencebench/default_agent` selector uses `react` by default. Change `harness` and pass native settings through `harness_args`, without creating another run-config file:
 
 ```bash
 uv run inspect eval --run-config src/inferencebench/run_configs/default.yaml \
-  --model openrouter/anthropic/claude-sonnet-4.6 \
-  --solver inspect_swe/claude_code \
-  -S cwd=/home/agent/task -S user=root -S version=auto
+  --model provider/model \
+  --solver inferencebench/default_agent \
+  -S harness=claude_code \
+  -S 'harness_args={"version":"2.1.267","permission_mode":"bypassPermissions","retry_refusals":0,"env":{"BASH_MAX_TIMEOUT_MS":"36000000"}}'
 ```
 
-Replace `claude_code` with `codex_cli`, `opencode`, or `gemini_cli`. `--model` selects the model behind the CLI; `-S` passes the selected Inspect SWE agent's options, such as `version`, `env`, or CLI-specific settings. `version=auto` uses an installed CLI or downloads Inspect SWE's default version; use an explicit version for reproducibility. The CLI runs in the same GPU sandbox, with shared preparation and final grading. Modal remains the default; `-T gpu_provider=runpod` still works.
+For Codex, keep `--solver inferencebench/default_agent` and use `-S harness=codex_cli -S 'harness_args={"version":"0.154.0","web_search":"disabled"}'`. Other supported native harnesses include `opencode`, `gemini_cli`, and `kimi_code`. Pin their version in `harness_args` for reproducibility. The maintained wrapper supplies the task directory, sandbox user, bridged search, continuation, budget reminders, and a 7200-second remote poll timeout. Its ReAct-only settings are ignored when selecting a CLI. Setup and final grading are shared; `-T gpu_provider=runpod` selects RunPod.
 
-To switch from `inferencebench/react_agent` to Claude Code in YAML, use the full name `inspect_swe/claude_code` and replace the **entire** `solver` block, including the ReAct-specific arguments:
+When passing `-S` overrides, include the explicit `--solver` name; the installed Inspect version does not apply standalone `-S` options to a run-config solver. In YAML, change only `solver.args.harness` and `solver.args.harness_args`. Direct `--solver inspect_swe/...` overrides also work but omit these task policies, including continuation and reminders. Native multi-attempt scoring must remain disabled because final grading restarts the submission.
 
-```yaml
-solver:
-  solver: inspect_swe/claude_code
-  args:
-    cwd: /home/agent/task
-    user: root
-    version: auto
-```
-
-Native CLIs use their own tools and stopping behavior, so they **can finish before exhausting the token budget**. Inspect's token cap still applies, but ReAct's nudges and reminders do not. Keep `attempts: 1` (Inspect SWE's default): additional attempts invoke this benchmark's final scorer between attempts, restarting the submission and exposing final feedback. For the original two-hour continuation behavior, keep the original wrapper and change its harness instead:
+For the original two-hour continuation behavior, keep the original wrapper and change its harness instead:
 
 ```bash
 uv run inspect eval --run-config src/inferencebench/run_configs/original.yaml \
-  --model openrouter/anthropic/claude-sonnet-4.6 \
+  --model provider/model \
   --solver inferencebench/original_agent -S harness=codex_cli -S version=auto \
   -T scenarios=A -T 'seed_pairs=[[21,1337]]'
 ```
@@ -110,7 +102,7 @@ uv run inspect eval --run-config src/inferencebench/run_configs/default.yaml \
   --token-limit 500000
 ```
 
-RunPod settings live in [runpod.yaml](../src/inferencebench/runpod.yaml): one H100 SXM 80GB, at least 16 vCPUs and 180 GB RAM, a 100 GB container disk, and a 100 GB attached volume. The volume holds an archive of the installed filesystem for final scoring. Copy this file and pass `-T gpu_config=/absolute/path/runpod.yaml` to change resource or startup settings. The adapter owns the pod name, SSH environment, entrypoint, and startup command.
+RunPod settings live in [runpod.yaml](../src/inferencebench/assets/sandboxes/runpod.yaml): one H100 SXM 80GB, at least 16 vCPUs and 180 GB RAM, a 100 GB container disk, and a 100 GB attached volume. The volume holds an archive of the installed filesystem for final scoring. Copy this file and pass `-T gpu_config=/absolute/path/runpod.yaml` to change resource or startup settings. The adapter owns the pod name, SSH environment, entrypoint, and startup command.
 
 With `bootstrap: true`, first boot executes [setup_environment.sh](../src/inferencebench/assets/scripts/setup_environment.sh), the same installation script used by the Dockerfile. This includes downloading the model and installing the pinned vLLM reference environment, and incurs GPU charges during setup. Restart restores the saved filesystem without reinstalling the environment. For repeated runs, build and push this package's Dockerfile to a registry you control, set `RUNPOD_IMAGE` or `pod.imageName` to its image reference, and set `bootstrap: false` in your provider config. `pod.containerRegistryAuthId` supports private-registry credentials already configured in RunPod.
 
@@ -130,7 +122,7 @@ RunPod support is locally tested with mocked REST calls and real SSH/Linux resta
 
 Adjustable task and solver defaults are in `src/inferencebench/run_configs/default.yaml`. `original.yaml` selects the original prompt, a two-hour deadline, the API-Claude harness variant, and no token cap. Claude Code 2.1.114 is the port’s tested version pin; upstream installed an unpinned CLI. The default changes the budget wording and uses ReAct with token reminders and continuation nudges.
 
-The configs show common Inspect controls. Additional native options can be added under `generate_config` or `eval_config`, or passed through the CLI.
+Keep `run_configs/` limited to `default.yaml` and `original.yaml`. Save experiment snapshots under `run-artifacts/<run-name>/`; provider YAML lives in `assets/sandboxes/`. The configs show common Inspect controls. Additional native options can be added under `generate_config` or `eval_config`, or passed through the CLI.
 
 Claude Code receives each pending task or continuation message through a file
 in `/tmp`, with a short instruction to read it. The instruction text is unchanged.
@@ -152,7 +144,7 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `max_model_len` | 32768 | Original evaluator and baseline context limit |
 | `baseline_dtype` | `float16` | Precision of the Transformers speed baseline and the reference server; `bfloat16` for bf16-native models |
 | `context_length` | `null` | Optimizing model's context window; used by Inspect compaction and model bridges |
-| `agent_seconds` | `null` | Optional optimization wall-clock limit; `original.yaml` uses 7200 seconds |
+| `agent_seconds` | `null` | Optional optimization wall-clock limit, reflected in the maintained prompt; starts after preparation and excludes final scoring. `original.yaml` uses 7200 seconds |
 | `eval_config.token_limit` | 100000000 | Total input-plus-output tokens per attempt; override with `--token-limit` |
 | `request_limit` | 10 | Requests per load profile; `null` requests the original scenario count |
 | `quality_samples` | 500 | MMLU-Pro quality-gate questions |
@@ -160,11 +152,12 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `quality_reference_backend` | `transformers` | Server measuring the MMLU-Pro reference: the original `transformers` server in both configs, or pinned vLLM 0.19.0 in float16, which answers in minutes but scores slightly higher |
 | `quality_concurrency` | 4 | Concurrent quality-gate requests, and the vLLM reference's concurrency; upstream measures the Transformers reference at 1 |
 | `quality_baseline_max_attempts` | 2 | Total attempts per reference question; failed questions retry individually. `1` accepts upstream's registry as its precompute wrote it |
-| `quality_tau` | 0.95 | Required fraction of the Transformers baseline accuracy |
+| `quality_tau` | 0.95 | Required fraction of the selected quality reference's accuracy |
 | `server_wait_seconds` | 900 | Final server readiness allowance |
 | `request_timeout_seconds` | 300 | Per-request timeout |
 | `system_prompt` | `token_budget` | Original task text adapted to token budgeting; `original.yaml` uses the verbatim prompt |
 | `strict_prompt` | `true` | Insert two bullets after the base-model constraint stating the leaderboard's strict rules: no third-party pre-quantized checkpoints, no modifying the evaluation harness. The authors' strict prompt is unreleased; `false` restores the paper's Table 2 prompt |
+| `automated_tuning` | `false` | Append an explicit instruction requiring automated hyperparameter search; it changes the prompt only, without installing tools or changing scoring |
 | `scorer` | `inference_speedup` | Replaceable scorer factory and judge-role options |
 
 The integrity judge is upstream's judge: after measurement, upstream's `get_judge_prompt.py` renders the rubric plus the restarted `start_server.sh` and the last 200 lines of `final-server.log`, and Claude Code (`judge_cli_version`, installed by Inspect SWE in the scoring sandbox) runs that prompt from `/home/agent/task` with permissions bypassed, exactly like upstream's `claude --print --dangerously-skip-permissions` call. The scorer first removes any verdict files the agent may have left, then reads `contamination_judgement.txt` and `disallowed_model_judgement.txt` back; a missing or malformed file leaves the sample unscored in `original.yaml` (`max_grader_attempts: 1`, as upstream judges once) and triggers a fresh judge run in the maintained configs. The judge model defaults to GPT-6 Astra through OpenRouter with low reasoning effort and `strict_tools: false`, because Claude Code's bridged tool schemas have optional parameters; `original.yaml` retains Claude Sonnet 4.6. It can be rebound with `--model-role integrity=...` and is separate from the subject model. `task.args.scorer.args.include_transcript` exports model outputs and tool results from the full Inspect event history, plus the current conversation, to `agent-transcript.json` in the scoring sandbox so compaction does not remove earlier evidence; both configs enable it, mirroring the CLI session logs that sat in the released judge's container. `transcript_hint` appends one line pointing the judge at that file: `default.yaml` enables it, `original.yaml` leaves the transcript unmentioned as upstream did.
@@ -204,7 +197,7 @@ This is an Inspect port with cloud GPU backends, not an exact reconstruction of 
 - Scenario D declares top-level concurrency 4, but the pinned runner reads profile-level concurrency and defaults to 1. This port preserves the executable behavior. The paper also describes some latency statistics differently from the implementation; this port uses the code's p50 fields.
 - Agents have root in their isolated sandbox. Restoring trusted inputs prevents accidental use of stale or edited metric files; it is not a security boundary against a malicious root server tampering with the local measurement process. The original integrity rubric remains the check for prohibited behavior.
 
-The small [modal_sandbox.py](../src/inferencebench/modal_sandbox.py) adapter replaces the retired filesystem API still used by inspect-sandboxes 0.5.0 and upstream commit `02a9f898d73b`. It retains the upstream provider for execution, creation, and cleanup. See [Modal’s migration guide](https://modal.com/docs/guide/migrate-sandbox-filesystem).
+The small [utils/sandboxes/modal.py](../src/inferencebench/utils/sandboxes/modal.py) adapter replaces the retired filesystem API still used by inspect-sandboxes 0.5.0 and upstream commit `02a9f898d73b`. It retains the upstream provider for execution, creation, and cleanup. See [Modal’s migration guide](https://modal.com/docs/guide/migrate-sandbox-filesystem).
 
 ## Code map
 
@@ -212,13 +205,13 @@ Start with [task.py](../src/inferencebench/task.py), which connects these module
 
 | File | Responsibility |
 | --- | --- |
-| `run_configs/default.yaml`, `original.yaml`, `claude_code.yaml`, `codex_cli.yaml` | Workload, agent, judge, and budget settings |
+| `run_configs/default.yaml`, `original.yaml` | Workload, agent, judge, and budget settings |
 | `upstream/`, `upstream.lock`, `patches/`, [vendored.py](../src/inferencebench/vendored.py) | The pinned upstream copy, its recorded commit and tree hash, the port's patches, and their checks |
 | [dataset.py](../src/inferencebench/dataset.py), [prompts.py](../src/inferencebench/prompts.py) | Scenario/seed samples from the vendored task directories and prompt provenance |
 | [environment.py](../src/inferencebench/environment.py) | Shared H100 setup, trusted inputs, and scoring restart |
-| [modal_sandbox.py](../src/inferencebench/modal_sandbox.py), [runpod_sandbox.py](../src/inferencebench/runpod_sandbox.py) | Provider allocation, SSH/file transport, persistence, and cleanup |
-| [harness_default.py](../src/inferencebench/harness_default.py), [harness_original.py](../src/inferencebench/harness_original.py) | ReAct and coding CLI agents |
-| [cli.py](../src/inferencebench/cli.py), [reminders.py](../src/inferencebench/reminders.py) | Native CLI bridge settings, shared continuation, and budget messages |
+| [utils/sandboxes/modal.py](../src/inferencebench/utils/sandboxes/modal.py), [utils/sandboxes/runpod.py](../src/inferencebench/utils/sandboxes/runpod.py) | Shared provider allocation, SSH/file transport, and cleanup; task-specific persistence and restart live in environment.py |
+| [harness_default.py](../src/inferencebench/harness_default.py), [harness_original.py](../src/inferencebench/harness_original.py) | Task-specific ReAct, CLI, and original harness policies, tools, and reminders |
+| [utils/](../src/inferencebench/utils/) | Shared ReAct and CLI runtime, context settings, timeouts, downloads, checkpoints, recovery, resource reminders, and config loading |
 | [tools.py](../src/inferencebench/tools.py) | Model-independent Internet search |
 | [assets/scripts/runtime.py](../src/inferencebench/assets/scripts/runtime.py) | In-sandbox wrapper that installs the upstream copy and runs its entrypoints |
 | [scorers.py](../src/inferencebench/scorers.py), [metrics.py](../src/inferencebench/metrics.py) | Final measurements, integrity judgment, and aggregation |
@@ -232,6 +225,7 @@ Packaged assets are grouped by purpose:
 | `prompts/` | The maintained token-budget prompt; the original prompt and rubric are read from `upstream/` |
 | `licenses/` | Upstream and dataset licenses and attribution notices |
 | `scripts/` | Container setup, RunPod startup, and the in-sandbox wrapper |
+| `sandboxes/` | Modal compose and RunPod provider YAML |
 
 ## Validation
 
