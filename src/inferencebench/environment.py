@@ -341,10 +341,16 @@ def prepare_environment() -> Solver:
 
 async def restart_for_scoring(state, include_transcript: bool):
     """Restore the submitted filesystem into a new H100 sandbox and reinstall trusted evaluator inputs from the host."""
-    env = await gpu_environment().restart(state.metadata["gpu_config"])
+    current = gpu_environment()
+    folder = Path(store().get("artifacts"))
+    if os.environ.get("HAWK_JOB_ID"):
+        # Retain the submission even if snapshotting or restoring the full filesystem fails.
+        if include_transcript:
+            write_agent_transcript(folder / "agent-transcript.json", state)
+        await copy_submission(current, folder)
+    env = await current.restart(state.metadata["gpu_config"])
     try:
         state.metadata["scoring_sandbox_id"] = env.resource_id
-        folder = Path(store().get("artifacts"))
         (folder / "scoring-sandbox.json").write_text(
             json.dumps(
                 {
@@ -394,6 +400,8 @@ async def copy_submission(env, folder: Path):
         await checked_exec(env, ["tar", "--ignore-failed-read", "-czf", f"{REMOTE}/submission.tar.gz",
                                  "-C", "/home/agent", "task"], 300)
         await env.download(f"{REMOTE}/submission.tar.gz", str(folder / "submission.tar.gz"))
+        # The full filesystem snapshot should not contain a second copy of the submission.
+        await checked_exec(env, ["rm", "-f", f"{REMOTE}/submission.tar.gz"], 30)
     except Exception as error:
         (folder / "submission-copy-error.txt").write_text(repr(error))
 

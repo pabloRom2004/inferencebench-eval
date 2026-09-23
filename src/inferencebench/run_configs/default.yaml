@@ -93,4 +93,6 @@ eval_config:
   # Total input-plus-output tokens per sample, including cached input.
   token_limit: 100000000
   time_limit: null
+  # Grade the saved submission after a solver error, retaining the error in the log.
+  score_on_error: true
   max_samples: 1

@@ -1097,6 +1097,70 @@ def test_registered_solver_error_is_preserved():
         )
 
 
+@pytest.mark.parametrize("profile", ["default", "original"])
+def test_solver_error_still_scores_submission(local_task, profile):
+    """Grade a partial submission and retain the solver failure in the durable log."""
+    _, env = local_task
+    task = inference_bench(config_defaults=profile, scenarios="A", seed_pairs=[[21, 1337]])
+    task.sandbox = None
+
+    @solver
+    def failing_agent():
+        async def solve(state, generate):
+            await generate(state)
+            raise RuntimeError("agent failed after writing a usable submission")
+        return solve
+
+    [log] = inspect_eval(
+        task, solver=failing_agent(), model="mockllm/subject",
+        model_roles={"integrity": judge_model()}, display="none", log_dir="logs",
+    )
+    sample = read_eval_log(log.location).samples[0]
+    assert sample.error is not None
+    assert "agent failed after writing a usable submission" in sample.error.message
+    assert sample.scores["inference_speedup"].value == {"speedup": 2.0}
+    env.terminate.assert_awaited_once()
+
+
+def test_snapshot_error_preserves_submission(local_task, monkeypatch, tmp_path):
+    """Save the submission before a failed scoring restart, without fabricating a grade."""
+    environment = importlib.import_module("inferencebench.environment")
+    from inspect_ai.hooks._hooks import get_all_hooks
+
+    monkeypatch.setenv("HAWK_JOB_ID", "local-restart-error-test")
+    hook = next(h for h in get_all_hooks() if isinstance(h, environment.HawkArtifacts))
+    destination = f"memory://inferencebench-test/{tmp_path.name}"
+    monkeypatch.setattr(hook, "destinations", {None: destination})
+    task, env = local_task
+    submission = b"saved submission archive"
+
+    async def download(remote, local):
+        Path(local).write_bytes(submission)
+
+    env.download = AsyncMock(side_effect=download)
+
+    async def restart(config):
+        assert (tmp_path / "submission.tar.gz").read_bytes() == submission
+        assert (tmp_path / "agent-transcript.json").exists()
+        raise TimeoutError("RunPod command exceeded its timeout")
+
+    env.restart = AsyncMock(side_effect=restart)
+    monkeypatch.setattr(environment, "gpu_environment", lambda: env)
+    monkeypatch.setattr(SCORERS, "restart_for_scoring", environment.restart_for_scoring)
+    [log] = inspect_eval(
+        task, solver=generate(), model="mockllm/subject", display="none", log_dir="logs",
+    )
+    sample = read_eval_log(log.location).samples[0]
+    assert log.status == "error"
+    assert "RunPod command exceeded its timeout" in sample.error.message
+    assert not sample.scores
+    env.download.assert_awaited_once()
+    fs, path = environment.url_to_fs(f"{destination}/artifacts/{sample.uuid}")
+    assert fs.cat(f"{path}/submission.tar.gz") == submission
+    assert fs.exists(f"{path}/agent-transcript.json")
+    fs.rm(path, recursive=True)
+
+
 def test_replacement_cleanup_after_artifact_failure(local_task, monkeypatch):
     """Release the replacement sandbox if host artifact bookkeeping fails before evaluator restoration."""
     environment = importlib.import_module("inferencebench.environment")
@@ -1294,6 +1358,7 @@ def test_judge_transcript_toggle(
         assert fs.exists(f"{path}/final.json")
         with tarfile.open(fileobj=io.BytesIO(fs.cat(f"{path}/submission.tar.gz"))) as archive:
             assert archive.extractfile("task/start_server.sh").read() == b"launcher evidence"
+        assert not local_path(f"{environment.REMOTE}/submission.tar.gz").exists()
         assert fs.exists(f"{path}/agent-transcript.json") is enabled
         fs.rm(path, recursive=True)
 
@@ -1426,11 +1491,11 @@ def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path, fai
         return solve
 
     [log] = inspect_eval(task, solver=broken_agent(), model="mockllm/subject",
-                        display="none", log_dir="logs")
+                        model_roles={"integrity": judge_model()}, display="none", log_dir="logs")
     assert log.status == "error"
     sample = read_eval_log(log.location).samples[0]
     assert ("native agent died" if failure == "solver" else "SSH connection failed") in sample.error.message
-    assert not sample.scores
+    assert sample.scores["inference_speedup"].value == {"speedup": 2.0}
     fs, path = environment.url_to_fs(f"{destination}/artifacts/{sample.uuid}")
     with tarfile.open(fileobj=io.BytesIO(fs.cat(f"{path}/submission.tar.gz"))) as archive:
         assert archive.extractfile("task/start_server.sh").read() == b"unfinished launcher"
@@ -2008,7 +2073,7 @@ def test_prepare_failure_retains_measured_speed_baseline(monkeypatch, tmp_path):
         return log
 
     failed = run()
-    assert failed.status == "error" and "reference failed" in failed.error.message
+    assert failed.status == "error" and "reference failed" in failed.samples[0].error.message
     [stored] = list((tmp_path / "baselines").iterdir())
     assert stored.name.startswith("A-seed1337") and (stored / "requests.jsonl").exists() and (stored / "baseline_metrics.json").exists()
     passed = run()

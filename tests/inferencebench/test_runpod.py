@@ -396,6 +396,7 @@ async def docker_pods(monkeypatch, tmp_path, request):
     context.mkdir()
     (context / "scripts").mkdir()
     (context / "scripts" / "runpod_start.sh").write_bytes((ASSETS / "scripts" / "runpod_start.sh").read_bytes())
+    (context / "scripts" / "runtime.py").write_bytes((ASSETS / "scripts" / "runtime.py").read_bytes())
     (context / "scripts" / "setup_environment.sh").write_text(
         "echo setup >> /workspace/setup-calls\n"
     )
@@ -406,7 +407,7 @@ async def docker_pods(monkeypatch, tmp_path, request):
         importlib.import_module("inferencebench.environment"), "ASSETS", context
     )
     (context / "Dockerfile").write_text("""FROM ubuntu:22.04
-RUN apt-get update && apt-get install -y openssh-server rsync python3 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y openssh-server rsync python3 curl && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /home/agent/task /opt/evaluator/bin /opt/inferencebench/src/eval/inference/bin /opt/inference_eval/bin && touch /usr/local/lib/delete-me
 RUN mkdir -p /etc/nvidia/nvidia-application-profiles-rc.d
 COPY scripts/runpod_start.sh /opt/runpod_start.sh
@@ -445,6 +446,7 @@ folder = Path('/tmp/inferencebench')
 operation = sys.argv[2]
 metrics = {'profiles': {'burst': {'success_count': 1, 'ttft': {'p50': 2 if operation == 'prepare' else 1}}}, 'quality_check': {'pass': True}}
 if operation == 'install':
+    Path('/opt/inferencebench/src/eval/inference/bin/launch_supervised_server.sh').write_text('trusted')
     sys.exit(0)
 if operation == 'prepare':
     options = json.loads((folder / 'options.json').read_text())
@@ -453,9 +455,9 @@ if operation == 'prepare':
     trusted = folder / 'trusted'
     (trusted / 'speed').mkdir(parents=True, exist_ok=True)
     (trusted / 'quality').mkdir(exist_ok=True)
-    (trusted / 'speed/requests.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in rows))
+    (trusted / 'speed/requests.jsonl').write_text(''.join(json.dumps(row) + '\\n' for row in rows))
     (trusted / 'speed/baseline_metrics.json').write_text(json.dumps({'baseline': metrics}))
-    (trusted / 'quality/samples.jsonl').write_text('{}\n')
+    (trusted / 'quality/samples.jsonl').write_text('{}\\n')
     (trusted / 'provenance.json').write_text(json.dumps({'downloaded_model_revision': 'cpu-fixture', 'input_sha256': {}}))
     (trusted / 'environment.json').write_text(json.dumps({'INFERENCE_BENCH_BASE_MODEL': options['base_model']}))
     Path('/home/agent/task/start_server.sh').touch()
@@ -568,7 +570,7 @@ else:
         await docker("image", "rm", image)
 
 
-@pytest.mark.parametrize("harness", ["react", "claude_code"])
+@pytest.mark.parametrize("harness", ["react", "claude_code", "react_error"])
 async def test_linux_transport_and_mock_evaluation(docker_pods, monkeypatch, tmp_path, harness):
     """Run real SSH tools, persisted root edits, a clean restart, and the real Inspect scorer on a CPU fixture."""
     [environments] = [await RunPodSandbox.sample_init("transport-test", None, {})]
@@ -664,7 +666,7 @@ sha256sum -c /tmp/capacity.sha256
     )
     task.solver = (
         react_agent(nudge_prompt=False, token_budget_reminder=False)
-        if harness == "react" else as_solver(cli_agent(
+        if harness.startswith("react") else as_solver(cli_agent(
             "claude_code", {"version": "2.1.114", "permission_mode": "bypassPermissions", "retry_refusals": 0},
             nudge_prompt=False, token_budget_reminder=False,
         ))
@@ -685,14 +687,20 @@ python3 -u -c 'import time; exec("while True: print(123); time.sleep(0.001)")' >
 cd /home/agent/task && python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/old-server.log 2>&1 </dev/null &
 python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlopen("http://127.0.0.1:8765").status)'
 """
+    outputs = [
+        *([ModelOutput.for_tool_call("mockllm/subject", "Bash", {"command": "cat /tmp/inferencebench-input-*.txt"})]
+          if harness == "claude_code" else []),
+        ModelOutput.for_tool_call("mockllm/subject", "bash" if harness.startswith("react") else "Bash", {"command": command}),
+        ModelOutput.from_content("mockllm/subject", "Ready"),
+    ]
+
+    def output(messages, tools, tool_choice, config):
+        if harness == "react_error" and len(outputs) == 1:
+            raise RuntimeError("provider failure after a real sandbox edit")
+        return outputs.pop(0)
+
     subject = get_model(
-        "mockllm/subject",
-        custom_outputs=[
-            *([ModelOutput.for_tool_call("mockllm/subject", "Bash", {"command": "cat /tmp/inferencebench-input-*.txt"})]
-              if harness == "claude_code" else []),
-            ModelOutput.for_tool_call("mockllm/subject", "bash" if harness == "react" else "Bash", {"command": command}),
-            ModelOutput.from_content("mockllm/subject", "Ready"),
-        ],
+        "mockllm/subject", custom_outputs=output, memoize=False,
     )
     judge = get_model(
         "mockllm/judge",
@@ -731,7 +739,9 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
         model_roles={"integrity": judge},
         log_dir="logs",
     )
-    assert log.status == "success", log.error
+    assert log.status == ("error" if harness == "react_error" else "success"), log.error
+    if harness == "react_error":
+        assert "provider failure after a real sandbox edit" in log.samples[0].error.message
     if harness == "claude_code":
         assert injected
         sample = read_eval_log(log.location, resolve_attachments=True).samples[0]
@@ -748,7 +758,7 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
     )
     score = log.samples[0].scores["inference_speedup"]
     assert score.value == {"speedup": 2.0}
-    assert (Path(log.samples[0].store["artifacts"]) / "quality-baseline.tar.gz").is_file()
+    assert (Path(log.samples[0].store["artifacts"]) / "prepare-artifacts.tar.gz").is_file()
     assert not docker_pods.pods
     assert any(path.endswith("/restart") for method, path in docker_pods.calls)
     assert sum(path.endswith("/restart") for method, path in docker_pods.calls) == 1

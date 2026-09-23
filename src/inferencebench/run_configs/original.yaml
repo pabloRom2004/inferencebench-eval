@@ -78,4 +78,6 @@ eval_config:
   epochs_reducer: [inferencebench/complete_mean]
   token_limit: null
   time_limit: null
+  # Grade the saved submission after a solver error, retaining the error in the log.
+  score_on_error: true
   max_samples: 1

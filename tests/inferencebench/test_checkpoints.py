@@ -126,6 +126,7 @@ def test_cli_checkpoint_preserves_progress_and_scoring(
         retry_attempts=2,
         retry_wait=0.001,
         retry_immediate=False,
+        retry_cleanup=False,
         display="none",
         log_shared=False,
     )
@@ -137,4 +138,10 @@ def test_cli_checkpoint_preserves_progress_and_scoring(
     assert sample.store["completed_turns"] == 2
     assert sample.token_limit_usage == 400
     assert sample.scores["retry_scorer"].value == {"speedup": 2.0}
-    env.terminate.assert_awaited_once()
+    # A provider failure now grades the partial submission before resuming.
+    expected_scores = 2 if failure == "model" else 1
+    assert env.terminate.await_count == expected_scores
+    if failure == "model":
+        previous = [read_eval_log(path) for path in (tmp_path / "evals").glob("*.eval")]
+        failed = next(log.samples[0] for log in previous if log.samples[0].error)
+        assert failed.scores["retry_scorer"].value == {"speedup": 2.0}
