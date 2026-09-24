@@ -166,8 +166,6 @@ def speed_baseline(options):
         "--request-timeout-s", str(TORCH_BASELINE_TIMEOUT_S),
         "--concurrency-override", "1",
     ]
-    if options["request_limit"] is not None:
-        command += ["--request-limit", str(options["request_limit"])]
     run_upstream(command, "speed-baseline.log", env=evaluator_env(options, options["eval_seed"]))
     return folder
 
@@ -424,8 +422,6 @@ def evaluate(options):
         "--requests-file", str(speed_folder(options) / "requests.jsonl"),
         "--quality-tau", str(options["quality_tau"]),
     ]
-    if options["request_limit"] is not None:
-        command += ["--request-limit", str(options["request_limit"])]
     env = {"INFERENCE_BENCH_DATASET_SEED": str(options["eval_seed"]), **evaluator_env(options, options["eval_seed"])}
     # Upstream: three attempts at the configured timeout, then two at 150 seconds, each capped at an hour.
     for extra in [[], [], [], ["--request-timeout-s", "150"], ["--request-timeout-s", "150"]]:

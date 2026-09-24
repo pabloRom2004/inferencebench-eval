@@ -36,7 +36,6 @@ def inference_bench(
     baseline_dtype:          str = DEFAULT_TASK_ARGS["baseline_dtype"],
     context_length:          int | None = DEFAULT_TASK_ARGS["context_length"],
     agent_seconds:           int | None = DEFAULT_TASK_ARGS["agent_seconds"],
-    request_limit:           int | None = DEFAULT_TASK_ARGS["request_limit"],
     quality_samples:         int = DEFAULT_TASK_ARGS["quality_samples"],
     quality_seed:            int = DEFAULT_TASK_ARGS["quality_seed"],
     quality_reference_backend: str = DEFAULT_TASK_ARGS["quality_reference_backend"],
@@ -70,8 +69,6 @@ def inference_bench(
     counts = [max_model_len, quality_samples, quality_concurrency, quality_baseline_max_attempts]
     if context_length is not None and (type(context_length) is not int or context_length <= 0):
         raise ValueError("context_length must be a positive integer or null")
-    if request_limit is not None:
-        counts.append(request_limit)
     if scenario_a_output_tokens is not None:
         counts.append(scenario_a_output_tokens)
     if any(type(value) is not int or value <= 0 for value in counts):

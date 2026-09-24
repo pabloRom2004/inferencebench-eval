@@ -244,12 +244,12 @@ def test_config_dataset_and_provenance():
         "scorer",
         "seed_pairs",
         "scenarios",
-        "request_limit",
         "quality_baseline_max_attempts",
         "quality_reference_backend",
         "seeded_arrivals",
         "scenario_a_output_tokens",
         "retokenize_outputs",
+        "quality_tau",
     }
     assert {
         key: value
@@ -668,7 +668,6 @@ def test_registered_yaml_solver(local_task, monkeypatch, tmp_path):
         {"quality_samples": True},
         {"quality_seed": -1},
         {"quality_seed": True},
-        {"request_limit": 1.5},
         {"max_model_len": 0},
         {"context_length": 0},
         {"context_length": -1},
@@ -1744,7 +1743,7 @@ def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):
     commands = []
     envs = []
     monkeypatch.setattr(runtime, "run_upstream", lambda command, log, env=None, **kwargs: (commands.append(command), envs.append(env)))
-    options = upstream_options(request_limit=10)
+    options = upstream_options()
     folder = runtime.speed_baseline(options)
     assert folder == tmp_path / "inference/baselines/speed/torch/inference_scenario_a_input_heavy/mistralai_Mistral-7B-Instruct-v0.3"
     [command] = commands
@@ -1753,7 +1752,8 @@ def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):
     assert flags["--scenario-id"] == "inference_scenario_a_input_heavy" and flags["--seed"] == "1337"
     assert flags["--out-root"] == str(tmp_path / "inference/baselines/speed/torch")
     assert flags["--registry"] == str(tmp_path / "inference/baselines/speed/torch/mistralai_Mistral-7B-Instruct-v0.3.json")
-    assert flags["--request-timeout-s"] == "900" and flags["--concurrency-override"] == "1" and flags["--request-limit"] == "10"
+    assert flags["--request-timeout-s"] == "900" and flags["--concurrency-override"] == "1"
+    assert "--request-limit" not in flags
     # The baseline replays the held-out seed's arrivals, as final scoring does.
     assert envs == [{"INFERENCE_BENCH_ARRIVAL_SEED": "1337", "INFERENCE_BENCH_RETOKENIZE_OUTPUTS": "1", "INFERENCE_BENCH_OUTPUT_TOKEN_CAP": "16"}]
 
@@ -1967,14 +1967,14 @@ def test_final_evaluation_uses_upstream_command_and_retries(monkeypatch, tmp_pat
         return 1
 
     monkeypatch.setattr(runtime, "run_upstream", run_upstream)
-    options = upstream_options(request_limit=10)
+    options = upstream_options()
     assert runtime.evaluate(options) == measurements()
     assert len(attempts) == 3
     command, env, timeout, check = attempts[0]
     assert command[1] == str(UPSTREAM / "src/eval/tasks/inference_scenario_a_input_heavy/evaluate.py")
     flags = dict(zip(command[2::2], command[3::2]))
     assert flags["--requests-file"] == str(tmp_path / "inference/baselines/speed/torch/inference_scenario_a_input_heavy/mistralai_Mistral-7B-Instruct-v0.3/requests.jsonl")
-    assert flags["--quality-tau"] == "0.95" and flags["--request-limit"] == "10" and "--request-timeout-s" not in flags
+    assert flags["--quality-tau"] == "0.9" and "--request-limit" not in flags and "--request-timeout-s" not in flags
     assert env == {"INFERENCE_BENCH_DATASET_SEED": "1337", "INFERENCE_BENCH_ARRIVAL_SEED": "1337", "INFERENCE_BENCH_RETOKENIZE_OUTPUTS": "1", "INFERENCE_BENCH_OUTPUT_TOKEN_CAP": "16"} and timeout == 3600 and check is False
     attempts.clear()
     monkeypatch.setattr(runtime, "run_upstream", lambda command, log, **kwargs: attempts.append(command) and 1)

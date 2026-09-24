@@ -27,7 +27,6 @@ task:
     scenario_a_output_tokens: null
     # Upstream uses server-reported usage, else whitespace words.
     retokenize_outputs: false
-    request_limit: null
     quality_samples: 500
     quality_seed: 248
     quality_reference_backend: transformers

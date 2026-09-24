@@ -451,7 +451,7 @@ if operation == 'install':
 if operation == 'prepare':
     options = json.loads((folder / 'options.json').read_text())
     rows = [{'messages': [{'role': 'user', 'content': 'synthetic request'}], 'ignore_eos': True,
-             'target_input_token_count': 7000, 'max_new_tokens': 1003}] * options['request_limit']
+             'target_input_token_count': 7000, 'max_new_tokens': 1003}] * 1
     trusted = folder / 'trusted'
     (trusted / 'speed').mkdir(parents=True, exist_ok=True)
     (trusted / 'quality').mkdir(exist_ok=True)
@@ -661,7 +661,6 @@ sha256sum -c /tmp/capacity.sha256
         gpu_provider="runpod",
         scenarios="A",
         seed_pairs=[[21, 1337]],
-        request_limit=1,
         quality_samples=16,
     )
     task.solver = (

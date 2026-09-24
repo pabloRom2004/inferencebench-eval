@@ -146,13 +146,12 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `context_length` | `null` | Optimizing model's context window; used by Inspect compaction and model bridges |
 | `agent_seconds` | `36000` | Optimization wall-clock limit (`null` removes it), reflected in the maintained prompt; starts after preparation and excludes final scoring. `original.yaml` uses 7200 seconds |
 | `eval_config.token_limit` | 100000000 | Total input-plus-output tokens per attempt; override with `--token-limit` |
-| `request_limit` | 10 | Requests per load profile; `null` requests the original scenario count |
 | `quality_samples` | 500 | MMLU-Pro quality-gate questions |
 | `quality_seed` | 248 | Fixed quality sample seed |
 | `quality_reference_backend` | `vllm` | Server measuring the MMLU-Pro reference: pinned vLLM 0.19.0 in float16, which answers in minutes but scores slightly higher; `original.yaml` uses the original `transformers` server |
 | `quality_concurrency` | 4 | Concurrent quality-gate requests, and the vLLM reference's concurrency; upstream measures the Transformers reference at 1 |
 | `quality_baseline_max_attempts` | 2 | Total attempts per reference question; failed questions retry individually. `1` accepts upstream's registry as its precompute wrote it |
-| `quality_tau` | 0.95 | Required fraction of the selected quality reference's accuracy |
+| `quality_tau` | 0.9 | Required fraction of the selected quality reference's accuracy; `original.yaml` keeps upstream's 0.95 |
 | `server_wait_seconds` | 900 | Final server readiness allowance |
 | `request_timeout_seconds` | 300 | Per-request timeout |
 | `system_prompt` | `token_budget` | Original task text adapted to token budgeting; `original.yaml` uses the verbatim prompt |
@@ -167,7 +166,7 @@ The integrity judge is upstream's judge: after measurement, upstream's `get_judg
 
 Each attempt caches the 503-document LongBench-v2 pool (465 MB) and the MMLU-Pro questions inside the sandbox with upstream's `cache_samples` command, then runs upstream's `precompute_baseline` for the held-out seed, exactly as the released baseline workflow does, so prompts have the right token lengths for whatever `base_model` is served. The development `evaluate.py` is upstream's stub over the `/opt/inference_eval` bundle and samples its requests from the cached pool with the development seed on the fly, as it does in the released container; final scoring passes upstream's `requests.jsonl` from the precompute, kept on the controller. The download and tokenization take a few minutes per attempt before the agent clock starts. The speed baseline, the MMLU-Pro reference, and the submitted server's quality test run on the allocated GPU. The [LongBench attribution](../src/inferencebench/assets/licenses/LONGBENCH_NOTICE) covers the runtime download. The patch in `patches/` repairs an upstream edge case where head truncation lands one token below the sampled minimum and would abort sampling; the applied patch names and digests are recorded in the attempt's provenance.
 
-`default.yaml` keeps `request_limit: 10`, which changes the experiment: scenario C replays ten requests per profile and cannot reach the original burst concurrency of 64. For the full workload, use `original.yaml`, which retains counts of A: 128, B: 64, C: 256 per profile, and D: 96 with `request_limit: null`. Upstream's sampler can abort when decoding a token prefix leaves a prompt one token below the scenario's minimum; a cache preparation on 2026-09-10 met this on 12 of 3,264 full-count prompts, which is what the patch repairs.
+Both configurations score the original request counts: A 128, B 64, C 256 per profile, and D 96. Upstream's sampler can abort when decoding a token prefix leaves a prompt one token below the scenario's minimum; a cache preparation on 2026-09-10 met this on 12 of 3,264 full-count prompts, which is what the patch repairs.
 
 ## Scoring and fidelity
 

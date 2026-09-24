@@ -38,7 +38,6 @@ def main():
         gpu_config=args.gpu_config,
         scenarios="A",
         seed_pairs=[[21, 1337]],
-        request_limit=1,
         quality_samples=16,
         agent_seconds=180,
     )
