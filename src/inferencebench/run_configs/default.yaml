@@ -76,8 +76,9 @@ generate_config:
   max_tokens: null
   seed: null
   reasoning_effort: null
-  max_retries: 10
-  attempt_timeout: 900
+  # Long runs ride out provider outages instead of failing the sample.
+  max_retries: 300
+  attempt_timeout: 2700
 
 model_roles:
   integrity:
@@ -89,8 +90,8 @@ model_roles:
       temperature: null
       max_tokens: null
       reasoning_effort: low
-      max_retries: 10
-      attempt_timeout: 900
+      max_retries: 300
+      attempt_timeout: 2700
 
 eval_config:
   limit: null
