@@ -51,6 +51,7 @@ def inference_bench(
     strict_prompt:           bool = DEFAULT_TASK_ARGS["strict_prompt"],
     automated_tuning:        bool = DEFAULT_TASK_ARGS["automated_tuning"],
     seeded_arrivals:         bool = DEFAULT_TASK_ARGS["seeded_arrivals"],
+    scenario_a_output_tokens: int | None = DEFAULT_TASK_ARGS["scenario_a_output_tokens"],
     scorer:                  dict[str, Any] = DEFAULT_TASK_ARGS["scorer"],
 ) -> Task:
     """Optimize the configured base model's inference for four workloads on one H100 using the original evaluator."""
@@ -70,8 +71,10 @@ def inference_bench(
         raise ValueError("context_length must be a positive integer or null")
     if request_limit is not None:
         counts.append(request_limit)
+    if scenario_a_output_tokens is not None:
+        counts.append(scenario_a_output_tokens)
     if any(type(value) is not int or value <= 0 for value in counts):
-        raise ValueError("Model length, concurrency, and sample counts must be positive integers")
+        raise ValueError("Model length, concurrency, sample, and token counts must be positive integers")
     if type(quality_seed) is not int or quality_seed < 0:
         raise ValueError("quality_seed must be a nonnegative integer")
     if quality_reference_backend not in {"transformers", "vllm"}:

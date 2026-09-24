@@ -74,13 +74,16 @@ def environment(options):
     }
     if num_hours(options) is not None:
         env["NUM_HOURS"] = num_hours(options)
-    env.update(arrivals(options, options["dev_seed"]))
+    env.update(evaluator_env(options, options["dev_seed"]))
     return env
 
 
-def arrivals(options, seed) -> dict[str, str]:
-    """Seed the patched evaluator's Poisson arrivals with the requests' LongBench seed when configured."""
-    return {"INFERENCE_BENCH_ARRIVAL_SEED": str(seed)} if options["seeded_arrivals"] else {}
+def evaluator_env(options, seed) -> dict[str, str]:
+    """Configure the patched evaluator's arrival seed and Scenario A output cap when enabled."""
+    env = {"INFERENCE_BENCH_ARRIVAL_SEED": str(seed)} if options["seeded_arrivals"] else {}
+    if options["scenario"] == "A" and options["scenario_a_output_tokens"] is not None:
+        env["INFERENCE_BENCH_OUTPUT_TOKEN_CAP"] = str(options["scenario_a_output_tokens"])
+    return env
 
 
 def reference_backend(options) -> str:
@@ -163,7 +166,7 @@ def speed_baseline(options):
     ]
     if options["request_limit"] is not None:
         command += ["--request-limit", str(options["request_limit"])]
-    run_upstream(command, "speed-baseline.log", env=arrivals(options, options["eval_seed"]))
+    run_upstream(command, "speed-baseline.log", env=evaluator_env(options, options["eval_seed"]))
     return folder
 
 
@@ -451,7 +454,7 @@ def evaluate(options):
     ]
     if options["request_limit"] is not None:
         command += ["--request-limit", str(options["request_limit"])]
-    env = {"INFERENCE_BENCH_DATASET_SEED": str(options["eval_seed"]), **arrivals(options, options["eval_seed"])}
+    env = {"INFERENCE_BENCH_DATASET_SEED": str(options["eval_seed"]), **evaluator_env(options, options["eval_seed"])}
     # Upstream: three attempts at the configured timeout, then two at 150 seconds, each capped at an hour.
     for extra in [[], [], [], ["--request-timeout-s", "150"], ["--request-timeout-s", "150"]]:
         if metrics.is_file():

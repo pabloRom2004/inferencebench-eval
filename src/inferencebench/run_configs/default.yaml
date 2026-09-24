@@ -23,6 +23,8 @@ task:
     automated_tuning: false
     # Seed scenario C's Poisson arrivals from each run's LongBench seed.
     seeded_arrivals: true
+    # Scenario A scores TTFT only; cap its forced outputs to 16 tokens.
+    scenario_a_output_tokens: 16
     request_limit: 10
     quality_samples: 500
     quality_seed: 248

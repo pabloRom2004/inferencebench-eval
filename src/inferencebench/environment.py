@@ -57,6 +57,7 @@ def speed_baseline_identity(options: dict[str, Any], gpu: str) -> dict[str, Any]
         "gpu": gpu,
         **{key: options[key] for key in (
             "base_model", "scenario", "eval_seed", "request_limit", "max_model_len", "baseline_dtype", "seeded_arrivals",
+            "scenario_a_output_tokens",
         )},
     }
 

@@ -22,6 +22,8 @@ task:
     automated_tuning: false
     # Upstream draws Poisson arrivals unseeded.
     seeded_arrivals: false
+    # Upstream forces 819-1024 output tokens in Scenario A.
+    scenario_a_output_tokens: null
     request_limit: null
     quality_samples: 500
     quality_seed: 248

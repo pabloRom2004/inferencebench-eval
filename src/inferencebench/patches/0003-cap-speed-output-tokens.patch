@@ -1,0 +1,35 @@
+diff --git a/src/eval/inference/runner.py b/src/eval/inference/runner.py
+index 9442fe2..d711aa7 100644
+--- a/src/eval/inference/runner.py
++++ b/src/eval/inference/runner.py
+@@ -122,6 +122,12 @@ def _get_input_token_margin() -> int:
+     return max(0, margin)
+ 
+ 
++def _output_token_cap(max_new_tokens: int) -> int:
++    # A harness-set cap shortens forced speed outputs while leaving request sampling unchanged.
++    cap = os.environ.get("INFERENCE_BENCH_OUTPUT_TOKEN_CAP", "").strip()
++    return min(max_new_tokens, int(cap)) if cap else max_new_tokens
++
++
+ def _compute_max_input_tokens(max_model_len: Optional[int], max_new_tokens: int) -> Optional[int]:
+     if max_model_len is None:
+         return None
+@@ -234,7 +240,7 @@ def _load_requests_jsonl(
+                 elif re.fullmatch(r"[-+]?\d[\d,]*", gold):
+                     parse_mode = "gsm8k"
+ 
+-            max_new_tokens = int(record.get("max_new_tokens", max_new_tokens_default))
++            max_new_tokens = _output_token_cap(int(record.get("max_new_tokens", max_new_tokens_default)))
+             temperature = float(record.get("temperature", temperature_default))
+             require_json = bool(record.get("require_json", require_json_default))
+             record_ignore_eos = bool(record.get("ignore_eos", ignore_eos))
+@@ -519,7 +525,7 @@ def _prepare_requests(
+                 f"realized_input_token_count={realized_input_tokens} min_input_tokens={min_input_tokens} "
+                 f"target_input_len={target_input_len} sample_id={record.get('sample_id', '')}"
+             )
+-        max_new_tokens = output_rng.randint(min_output_tokens, output_len)
++        max_new_tokens = _output_token_cap(output_rng.randint(min_output_tokens, output_len))
+         req: Dict[str, Any] = {
+             "messages": messages,
+             "max_new_tokens": max_new_tokens,
