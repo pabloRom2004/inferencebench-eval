@@ -32,10 +32,9 @@ from inferencebench.vendored import patch_digest, upstream_archive, upstream_loc
 REMOTE = "/tmp/inferencebench"
 EVALUATOR = "/opt/evaluator/bin/python"
 UPSTREAM_ROOT = "/opt/inferencebench"
-# Measurements taken once per workload and GPU model and shared by later samples, like upstream's precomputed registries.
+# Speed baselines taken once per workload and GPU model and shared by later samples, like upstream's precomputed registries.
 BASELINE_CACHE = Path("run-artifacts") / "baselines"
 SPEED_BASELINE_FILES = ("requests.jsonl", "baseline_metrics.json")
-QUALITY_REFERENCE_FILES = ("samples.jsonl", "baseline_generations.jsonl")
 
 
 def gpu_model(inventory: str) -> str:
@@ -62,21 +61,6 @@ def speed_baseline_identity(options: dict[str, Any], gpu: str) -> dict[str, Any]
     }
 
 
-def quality_reference_identity(options: dict[str, Any], gpu: str) -> dict[str, Any]:
-    """Identify a reusable MMLU-Pro reference by model, backend, question selection, precision, upstream code, and GPU model; the configuration name, agent, and workload play no part."""
-    backend = options["quality_reference_backend"]
-    return {
-        "format_version": 1,
-        "kind": "quality_reference",
-        **upstream_identity(),
-        "gpu": gpu,
-        **{key: options[key] for key in ("base_model", "quality_seed", "quality_samples", "baseline_dtype", "max_model_len")},
-        "backend": backend,
-        # Upstream's precompute measures the Transformers reference sequentially whatever concurrency is configured.
-        "concurrency": 1 if backend == "transformers" else options["quality_concurrency"],
-    }
-
-
 def measurement_folder(identity: dict[str, Any], prefix: str) -> Path:
     """Place each shared measurement in a folder named by its workload and a digest of the full identity."""
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12]
@@ -87,17 +71,6 @@ def measurement_folder(identity: dict[str, Any], prefix: str) -> Path:
 def speed_baseline_folder(identity: dict[str, Any]) -> Path:
     """The shared folder for one scenario, evaluation seed, and identity."""
     return measurement_folder(identity, f"{identity['scenario']}-seed{identity['eval_seed']}")
-
-
-def quality_reference_folder(identity: dict[str, Any]) -> Path:
-    """The shared folder for one reference backend, question seed and count, and identity."""
-    return measurement_folder(identity, f"quality-{identity['backend']}-seed{identity['quality_seed']}-n{identity['quality_samples']}")
-
-
-def registry_file(folder: Path) -> Path | None:
-    """The upstream quality registry stored beside a shared reference, whatever backend suffix it carries."""
-    registries = [path for path in folder.glob("*.json") if path.name != "manifest.json"]
-    return registries[0] if len(registries) == 1 else None
 
 
 def cached_measurement(folder: Path, identity: dict[str, Any], required: tuple[str, ...]) -> Path | None:
@@ -117,12 +90,6 @@ def cached_measurement(folder: Path, identity: dict[str, Any], required: tuple[s
 def cached_speed_baseline(identity: dict[str, Any]) -> Path | None:
     """The stored speed baseline for this identity, if complete."""
     return cached_measurement(speed_baseline_folder(identity), identity, SPEED_BASELINE_FILES)
-
-
-def cached_quality_reference(identity: dict[str, Any]) -> Path | None:
-    """The stored quality reference for this identity, if complete including its upstream registry."""
-    folder = cached_measurement(quality_reference_folder(identity), identity, QUALITY_REFERENCE_FILES)
-    return folder if folder is not None and registry_file(folder) is not None else None
 
 
 def store_measurement(folder: Path, measured: Path, identity: dict[str, Any], provenance: dict[str, Any]) -> Path:
@@ -246,24 +213,15 @@ def prepare_environment() -> Solver:
         )
         (folder / "gpu.txt").write_text(inventory)
 
-        # Reuse measurements already taken for this workload and model on this GPU model.
-        gpu = gpu_model(inventory)
-        identity = speed_baseline_identity(state.metadata, gpu)
+        # Reuse a speed baseline already taken for this workload and model on this GPU model.
+        identity = speed_baseline_identity(state.metadata, gpu_model(inventory))
         cached = cached_speed_baseline(identity)
-        quality_identity = quality_reference_identity(state.metadata, gpu)
-        cached_quality = cached_quality_reference(quality_identity)
         state.metadata["cached_speed_baseline"] = cached is not None
-        state.metadata["cached_quality_reference"] = cached_quality is not None
         await install_upstream(env, state.metadata)
-        shared = []
         if cached is not None:
-            shared.append(("speed", [cached / name for name in SPEED_BASELINE_FILES]))
-        if cached_quality is not None:
-            shared.append(("quality", [*(cached_quality / name for name in QUALITY_REFERENCE_FILES), registry_file(cached_quality), cached_quality / "manifest.json"]))
-        for kind, paths in shared:
-            await checked_exec(env, ["mkdir", "-p", f"{REMOTE}/cached/{kind}"], 30)
-            for path in paths:
-                await env.upload(str(path), f"{REMOTE}/cached/{kind}/{path.name}")
+            await checked_exec(env, ["mkdir", "-p", f"{REMOTE}/cached/speed"], 30)
+            for path in (cached / name for name in SPEED_BASELINE_FILES):
+                await env.upload(str(path), f"{REMOTE}/cached/speed/{path.name}")
 
         # Build reference measurements before the agent clock starts.
         try:
@@ -288,7 +246,7 @@ def prepare_environment() -> Solver:
                         (folder / "prepare-artifacts-error.txt").write_text(archive.stderr)
                 except Exception as error:
                     (folder / "prepare-artifacts-error.txt").write_text(repr(error))
-                # Completed measurements are reusable even when a later preparation step fails.
+                # A completed speed baseline is reusable even when a later preparation step fails.
                 provenance = {"gpu_inventory": inventory, "provider": state.metadata["gpu_provider"], "sample": folder.name}
                 speed_folder = folder / "trusted" / "speed"
                 if cached is None and all((speed_folder / name).is_file() for name in SPEED_BASELINE_FILES):
@@ -296,17 +254,6 @@ def prepare_environment() -> Solver:
                         cached = store_measurement(speed_baseline_folder(identity), speed_folder, identity, provenance)
                     except Exception as error:
                         (folder / "speed-baseline-store-error.txt").write_text(repr(error))
-                quality_folder = folder / "trusted" / "quality"
-                if cached_quality is None and all((quality_folder / name).is_file() for name in QUALITY_REFERENCE_FILES) and registry_file(quality_folder):
-                    try:
-                        measured = {}
-                        if (folder / "trusted" / "provenance.json").is_file():
-                            measured = json.loads((folder / "trusted" / "provenance.json").read_text()).get("quality_reference", {})
-                        cached_quality = store_measurement(quality_reference_folder(quality_identity), quality_folder, quality_identity, {
-                            **provenance, **{key: measured.get(key) for key in ("vllm_version", "concurrency", "retried_requests", "complete")},
-                        })
-                    except Exception as error:
-                        (folder / "quality-reference-store-error.txt").write_text(repr(error))
         (folder / "prepare.log").write_text(output)
 
         # Trusted scoring inputs now live outside the agent sandbox.
@@ -315,10 +262,6 @@ def prepare_environment() -> Solver:
         state.metadata["speed_baseline"] = {
             "source": "cache" if state.metadata["cached_speed_baseline"] else "measured",
             "folder": str(cached.resolve()) if cached is not None else None,
-        }
-        state.metadata["quality_reference"] = {
-            "source": "cache" if state.metadata["cached_quality_reference"] else "measured",
-            "folder": str(cached_quality.resolve()) if cached_quality is not None else None,
         }
 
         seconds = state.metadata["agent_seconds"]

@@ -156,7 +156,7 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - RunPod's [provider configuration](src/inferencebench/assets/sandboxes/runpod.yaml) separately allows `7200` seconds for saving the filesystem before grading (`snapshot_timeout_seconds`) and `7200` seconds for initial startup or restoration (`startup_timeout_seconds`). These infrastructure allowances do not extend `agent_seconds`; customize them with `gpu_config`.
 - `request_limit`: requests per profile; `10`, original `null` preserves full counts.
 - `quality_samples`, `quality_seed`: `500`, `248`.
-- `quality_reference_backend`: server measuring the MMLU-Pro reference; `vllm` (pinned 0.19.0) by default, which answers in minutes but scores a few questions higher on the same weights, tightening the gate to about 147 to 149 of 500; `transformers`, the original naive server, in `original.yaml` (about 57 minutes, 151/500, gate 144). Upstream's precompute runs the Transformers reference at concurrency 1 and other backends at `quality_concurrency`; the port does the same. The reference is measured once per model, backend, question selection, precision, upstream commit and GPU model, shared from `run-artifacts/baselines/`, and configurations with the same backend share one entry.
+- `quality_reference_backend`: server measuring the MMLU-Pro reference; `vllm` (pinned 0.19.0) by default, which answers in minutes but scores a few questions higher on the same weights, tightening the gate to about 147 to 149 of 500; `transformers`, the original naive server, in `original.yaml` (about 57 minutes, 151/500, gate 144). Upstream's precompute runs the Transformers reference at concurrency 1 and other backends at `quality_concurrency`; the port does the same. Every sample measures its own reference during preparation, before the agent clock starts.
 - `quality_baseline_max_attempts`: `2` retries a failed reference request once on its own and requires a complete reference; `1` accepts upstream's registry exactly as its precompute wrote it.
 - `quality_tau`: required fraction of reference accuracy; `0.95`.
 
@@ -195,6 +195,14 @@ The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring re
 Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailable integrity judgments remain unscored; infrastructure failures remain Inspect errors. Report incomplete runs with their completed, scored, and unscored attempt counts.
 
 ## Changelog
+
+### [16] - 2026-09-24
+
+- Default optimization budget gains a 10-hour wall-clock cap (`agent_seconds: 36000`) alongside the token limit.
+- `seeded_arrivals` seeds scenario C's Poisson arrival times from the requests' LongBench seed (default); `original.yaml` keeps upstream's unseeded draw.
+- `scenario_a_output_tokens` caps scenario A's forced outputs at 16 tokens by default, since the scenario scores TTFT only; `original.yaml` keeps 819 to 1024.
+- Default measures the MMLU-Pro reference with the pinned vLLM server; `original.yaml` keeps the Transformers server.
+- Remove the shared MMLU-Pro reference cache: each sample measures its own reference during preparation (minutes with vLLM).
 
 ### [15] - 2026-09-21
 

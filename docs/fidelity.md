@@ -105,11 +105,8 @@ and [environment defaults](https://github.com/aisa-group/InferenceBench/blob/24c
 
 ## MMLU-Pro reference
 
-The reference is measured once per model, backend, question selection,
-precision, upstream commit and GPU model, and shared with every later sample
-from `run-artifacts/baselines/`, as upstream's precomputed registry is shared
-across its runs; configurations with the same backend resolve to the same
-entry. `original.yaml` uses the float16 Transformers server
+Each sample measures its own reference during preparation, where upstream
+shares one precomputed registry across its runs. `original.yaml` uses the float16 Transformers server
 (`quality_reference_backend: transformers`), which answers the fixed 500 questions (seed 248) in about 57 minutes on an H100 and
 scored 151/500 on 2026-09-10 and 2026-09-17, so the 95% gate requires 144
 correct from a submission. The pinned vLLM 0.19.0 server answers them in under
