@@ -61,7 +61,8 @@ def test_provider_selection():
     assert inference_bench().sandbox.type == "inferencebench_modal"
     task = inference_bench(gpu_provider="runpod")
     assert task.sandbox.type == "inferencebench_runpod"
-    assert task.sandbox.config.endswith("runpod.yaml")
+    # Logged retries must not carry a controller-specific package path.
+    assert task.sandbox.config is None
     assert task.dataset[0].metadata["gpu_provider"] == "runpod"
     with pytest.raises(ValueError, match="gpu_provider"):
         inference_bench(gpu_provider="unknown")
@@ -853,3 +854,16 @@ async def test_connection_query_after_termination_is_unavailable(provider, monke
     assert not folder.exists()
     with pytest.raises(ConnectionError):
         await provider.connection()
+
+
+async def test_retry_reads_the_logged_sandbox_config(provider, monkeypatch):
+    """Initialize the provider from the sandbox spec a retried log carries, even when the package sits under the working directory."""
+    from inspect_ai._eval.loader import resolve_task_file_sandbox
+    from inspect_ai._util.path import cwd_relative_path
+
+    package = Path(importlib.import_module("inferencebench").__file__).parent
+    monkeypatch.chdir(package.parent)
+    spec = inference_bench(gpu_provider="runpod").sandbox
+    config = cwd_relative_path(spec.config) if spec.config else None
+    logged = resolve_task_file_sandbox(None, type(spec)(spec.type, config))
+    await RunPodSandbox.task_init("retry-test", logged.config)

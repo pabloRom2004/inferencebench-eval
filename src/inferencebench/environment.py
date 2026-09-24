@@ -425,6 +425,11 @@ def write_agent_transcript(path: Path, state) -> None:
 class InferenceSandbox(FileSystemModalSandbox):
     """Restart the submitted filesystem on a fresh GPU for trusted scoring."""
 
+    @classmethod
+    async def sample_init(cls, task_name, config, metadata):
+        """Build the packaged H100 image unless the task supplied its own provider configuration."""
+        return await super().sample_init(task_name, config or str(ASSETS / "sandboxes" / "compose.yaml"), metadata)
+
     async def restart(self, config_file: str | None) -> InferenceSandbox:
         """Preserve the submitted filesystem and allocate a fresh H100 without its running processes, keeping this registered object."""
         image = await self.sandbox.snapshot_filesystem.aio(timeout=55)

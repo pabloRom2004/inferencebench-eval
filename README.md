@@ -210,6 +210,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 - Checkpoint recovery (`checkpoint`, on by default, off in `original.yaml`): saves the task directory, native CLI sessions, conversation, and usage every ten minutes for ReAct, every CLI, and the original wrapper, and adds a resume note to the default prompt. A restore extends the deadline by its downtime.
 - `score_on_error` is `false` by default, so a crash resumes from its checkpoint instead of being graded; `original.yaml` keeps `true`.
 - Default model calls retry 20 times, down from 300.
+- Without `gpu_config`, the logged sandbox spec carries no config path and each provider reads its packaged file, so an eval-set retry on a new controller no longer fails with `FileNotFoundError`.
 
 ### [16] - 2026-09-24
 

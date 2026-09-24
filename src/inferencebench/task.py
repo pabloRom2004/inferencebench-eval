@@ -124,10 +124,9 @@ def inference_bench(
         cleanup=retain_failed_submission,
         solver=_solver_from_config(config["solver"]),
         scorer=scorers_from_spec(scorer),
-        sandbox=SandboxEnvironmentSpec(
-            f"inferencebench_{gpu_provider}",
-            gpu_config or str(Path(__file__).parent / ("assets/sandboxes/compose.yaml" if gpu_provider == "modal" else "assets/sandboxes/runpod.yaml")),
-        ),
+        # Without gpu_config the providers read their packaged file, so a retry from the log never
+        # resolves a path into an earlier controller's package directory.
+        sandbox=SandboxEnvironmentSpec(f"inferencebench_{gpu_provider}", gpu_config),
         config=GenerateConfig(**config["generate_config"]),
         epochs=Epochs(config["eval_config"]["epochs"], config["eval_config"]["epochs_reducer"]),
         token_limit=config["eval_config"]["token_limit"],
