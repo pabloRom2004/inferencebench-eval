@@ -158,6 +158,8 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `quality_reference_backend`: server measuring the MMLU-Pro reference; `vllm` (pinned 0.19.0) by default, which answers in minutes but scores a few questions higher on the same weights, tightening the gate to about 147 to 149 of 500; `transformers`, the original naive server, in `original.yaml` (about 57 minutes, 151/500, gate 144). Upstream's precompute runs the Transformers reference at concurrency 1 and other backends at `quality_concurrency`; the port does the same. Every sample measures its own reference during preparation, before the agent clock starts.
 - `quality_baseline_max_attempts`: `2` retries a failed reference request once on its own and requires a complete reference; `1` accepts upstream's registry exactly as its precompute wrote it.
 - `quality_tau`: required fraction of reference accuracy; `0.9` by default, which puts the gate about 15 of 500 questions below the reference, well outside the 3 to 5 questions that backend numerics move it; `0.95` in `original.yaml`.
+- `checkpoint`: save the attempt so a crash resumes on a fresh GPU; `true` by default, `false` in `original.yaml`. See [Checkpoint recovery](#checkpoint-recovery).
+- `checkpoint_seconds`, `checkpoint_max_failures`: save at the first agent boundary after every `600` seconds, and error the attempt after more than `3` consecutive failed saves.
 
 Generation (`generate_config`):
 
@@ -165,8 +167,8 @@ Generation (`generate_config`):
 - `max_tokens`: output cap per response; `null` (provider/Inspect default).
 - `seed`: `null` (unset).
 - `reasoning_effort`: `null` (provider default).
-- `max_retries`: API retries; `10`.
-- `attempt_timeout`: API attempt timeout; `900` seconds.
+- `max_retries`: API retries per call; `20`, original `10`.
+- `attempt_timeout`: API attempt timeout; `2700` seconds, original `900`.
 
 Evaluation (`eval_config`):
 
@@ -174,10 +176,18 @@ Evaluation (`eval_config`):
 - `epochs`: attempts per scenario/seed pair; `1`.
 - `token_limit`: cumulative input-plus-output tokens, including cached input; `100000000`, original `null`.
 - `time_limit`: native attempt deadline; `null`. The original uses `agent_seconds` above.
-- `score_on_error`: `true` in both profiles. A solver error still sends its partial submission through the normal restart, quality, speed, and integrity checks; the original error remains in the log. Infrastructure failures in grading remain errors, with no invented score. Hawk retains the submission and transcript before the scoring restart as well as after it, so a failed filesystem snapshot does not discard the task directory.
+- `score_on_error`: `false` by default, so a crashed attempt resumes from its checkpoint on the next eval-set retry instead of being graded; an attempt that exhausts its retries stays an unscored error. `true` in `original.yaml`: a solver error still sends its partial submission through the normal restart, quality, speed, and integrity checks, and the original error remains in the log. Infrastructure failures in grading remain errors, with no invented score. Hawk retains the submission and transcript before the scoring restart as well as after it, so a failed filesystem snapshot does not discard the task directory.
 - `max_samples`: concurrent attempts; `1`.
 
 The separate integrity judge runs the way upstream's does: upstream's `get_judge_prompt.py` renders the rubric with the restarted launcher and server-log tail, Claude Code (`judge_cli_version`, run through Inspect SWE with the model routed by Inspect) executes in the submission directory with permissions bypassed, and the two verdict files it writes decide the outcome. The judge model is GPT-6 Astra by default and Claude Sonnet 4.6 in the original config; change `model_roles.integrity` to replace it. Both configs export the agent transcript into the scoring sandbox, matching the released container where the CLI session logs sat unreferenced; only the default config's prompt points the judge at it. The original config judges once (`max_grader_attempts: 1`); the maintained configs re-run the judge when its verdict files are missing or malformed.
+
+### Checkpoint recovery
+
+With `checkpoint: true`, Inspect saves the conversation, token usage, sample store, `/home/agent/task`, and each native CLI's session (`~/.claude`, `~/.gemini`, `~/.kimi-code`, `~/.local/share/opencode` under `HOME=/home/agent`; Codex keeps its session in `/home/agent/task/.codex`). Installed packages, model weights outside the task directory, caches, and running servers are not saved. The task prompt gains one [line](src/inferencebench/prompts.py) telling the agent that a run can resume on a fresh machine, to keep weights outside `/home/agent/task`, and to reinstall and restart what is missing.
+
+A resumed attempt gets a fresh H100 and repeats preparation there, reusing the controller's cached speed baseline and re-measuring the vLLM quality reference; final scoring uses that fresh `trusted/` folder, which matches the reference the agent's `evaluate.py` now sees. The optimization deadline moves later by the time between the last saved checkpoint and the restore, and `timer.sh` is rewritten to match; reinstalling after the restore counts against the agent. Token usage continues from the checkpoint, and work after the last checkpoint is lost. A ReAct tool that finds its sandbox gone fails the attempt instead of reporting the error to the model.
+
+Resumption needs a retry. With `inspect eval-set` or Hawk, use delayed retries, for example `retry_attempts: 100` and `retry_immediate: false`, and run one sample per eval set so a retry does not wait for other samples. Plain `inspect eval` can resume a failed log with `inspect eval retry`.
 
 ## Dataset
 
@@ -194,6 +204,12 @@ The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring re
 Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailable integrity judgments remain unscored; infrastructure failures remain Inspect errors. Report incomplete runs with their completed, scored, and unscored attempt counts.
 
 ## Changelog
+
+### [17] - 2026-09-24
+
+- Checkpoint recovery (`checkpoint`, on by default, off in `original.yaml`): saves the task directory, native CLI sessions, conversation, and usage every ten minutes for ReAct, every CLI, and the original wrapper, and adds a resume note to the default prompt. A restore extends the deadline by its downtime.
+- `score_on_error` is `false` by default, so a crash resumes from its checkpoint instead of being graded; `original.yaml` keeps `true`.
+- Default model calls retry 20 times, down from 300.
 
 ### [16] - 2026-09-24
 
