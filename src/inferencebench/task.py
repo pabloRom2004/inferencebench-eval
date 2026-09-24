@@ -50,6 +50,7 @@ def inference_bench(
     system_prompt:           str = DEFAULT_TASK_ARGS["system_prompt"],
     strict_prompt:           bool = DEFAULT_TASK_ARGS["strict_prompt"],
     automated_tuning:        bool = DEFAULT_TASK_ARGS["automated_tuning"],
+    seeded_arrivals:         bool = DEFAULT_TASK_ARGS["seeded_arrivals"],
     scorer:                  dict[str, Any] = DEFAULT_TASK_ARGS["scorer"],
 ) -> Task:
     """Optimize the configured base model's inference for four workloads on one H100 using the original evaluator."""
@@ -79,6 +80,8 @@ def inference_bench(
         raise ValueError("automated_tuning must be a boolean")
     if type(strict_prompt) is not bool:
         raise ValueError("strict_prompt must be a boolean")
+    if type(seeded_arrivals) is not bool:
+        raise ValueError("seeded_arrivals must be a boolean")
     if baseline_dtype not in {"float16", "bfloat16", "float32"}:
         raise ValueError("baseline_dtype must be float16, bfloat16, or float32")
     durations = [server_wait_seconds, request_timeout_seconds]

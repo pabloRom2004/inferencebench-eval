@@ -157,6 +157,7 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `request_timeout_seconds` | 300 | Per-request timeout |
 | `system_prompt` | `token_budget` | Original task text adapted to token budgeting; `original.yaml` uses the verbatim prompt |
 | `strict_prompt` | `true` | Insert two bullets after the base-model constraint stating the leaderboard's strict rules: no third-party pre-quantized checkpoints, no modifying the evaluation harness. The authors' strict prompt is unreleased; `false` restores the paper's Table 2 prompt |
+| `seeded_arrivals` | `true` | Seed scenario C's Poisson arrivals from the requests' LongBench seed; `original.yaml` keeps upstream's unseeded draw |
 | `automated_tuning` | `false` | Append an explicit instruction requiring automated hyperparameter search; it changes the prompt only, without installing tools or changing scoring |
 | `scorer` | `inference_speedup` | Replaceable scorer factory and judge-role options |
 

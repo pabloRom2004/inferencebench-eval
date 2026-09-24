@@ -20,6 +20,8 @@ task:
     strict_prompt: true
     # Require an automated search tool during hyperparameter tuning.
     automated_tuning: false
+    # Upstream draws Poisson arrivals unseeded.
+    seeded_arrivals: false
     request_limit: null
     quality_samples: 500
     quality_seed: 248

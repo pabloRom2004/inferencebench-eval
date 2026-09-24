@@ -21,6 +21,8 @@ task:
     strict_prompt: true
     # Require an automated search tool during hyperparameter tuning.
     automated_tuning: false
+    # Seed scenario C's Poisson arrivals from each run's LongBench seed.
+    seeded_arrivals: true
     request_limit: 10
     quality_samples: 500
     quality_seed: 248

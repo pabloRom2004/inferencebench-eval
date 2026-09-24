@@ -247,6 +247,7 @@ def test_config_dataset_and_provenance():
         "request_limit",
         "quality_baseline_max_attempts",
         "quality_reference_backend",
+        "seeded_arrivals",
     }
     assert {
         key: value
@@ -1564,7 +1565,7 @@ def test_vendored_upstream_matches_pinned_commit():
     lock = vendored.upstream_lock()
     assert vendored.git_tree_hash(vendored.UPSTREAM) == lock["tree"]
     assert len(lock["commit"]) == 40 and lock["source"].startswith("https://github.com/")
-    assert [patch.name for patch in vendored.PATCHES] == ["0001-repair-head-truncation-boundary.patch"]
+    assert [patch.name for patch in vendored.PATCHES] == ["0001-repair-head-truncation-boundary.patch", "0002-seed-poisson-arrivals.patch"]
     assert vendored.scenario_directories() == {
         "A": "inference_scenario_a_input_heavy", "B": "inference_scenario_b_output_heavy",
         "C": "inference_scenario_c_high_load", "D": "inference_scenario_d_general",
@@ -1591,7 +1592,7 @@ def test_original_prompt_matches_upstream_renderer(tmp_path):
 
 
 def load_patched_runner(tmp_path, monkeypatch, patched):
-    """Import upstream's sampler from a scratch package, optionally with the port's patch applied."""
+    """Import upstream's sampler from a scratch package, optionally with the port's patches applied."""
     import subprocess
 
     from inferencebench.vendored import PATCHES, UPSTREAM
@@ -1602,11 +1603,11 @@ def load_patched_runner(tmp_path, monkeypatch, patched):
     for name in ["__init__.py", "runner.py", "quality_gate.py"]:
         (package / name).write_bytes((UPSTREAM / "src/eval/inference" / name).read_bytes())
     if patched:
-        [patch] = PATCHES
-        # The patch addresses src/eval/inference/runner.py; apply it against the copied package path.
-        text = patch.read_text().replace("src/eval/inference/", f"{package.name}/")
-        (tmp_path / "patched" / "runner.patch").write_text(text)
-        subprocess.run(["git", "apply", "runner.patch"], cwd=tmp_path / "patched", check=True)
+        # The patches address src/eval/inference/runner.py; apply them in order against the copied package path.
+        for patch in PATCHES:
+            text = patch.read_text().replace("src/eval/inference/", f"{package.name}/")
+            (tmp_path / "patched" / "runner.patch").write_text(text)
+            subprocess.run(["git", "apply", "runner.patch"], cwd=tmp_path / "patched", check=True)
     for module in ["aiohttp", "numpy", "requests"]:
         monkeypatch.setitem(sys.modules, module, SimpleNamespace(ClientSession=object))
     monkeypatch.syspath_prepend(str(package.parent))
@@ -1645,6 +1646,20 @@ def test_upstream_patch_repairs_boundary_truncation(tmp_path, monkeypatch, patch
     assert request["input_token_count"] == 100 and "~" not in request["messages"][0]["content"]
 
 
+def test_patch_seeds_poisson_arrivals(tmp_path, monkeypatch):
+    """Repeat the Poisson schedule for one arrival seed, vary it across seeds, and stay unseeded without one."""
+    runner, _ = load_patched_runner(tmp_path, monkeypatch, True)
+
+    def schedule(seed):
+        """Draw scenario C's Poisson arrivals under the given seed setting."""
+        monkeypatch.setenv("INFERENCE_BENCH_ARRIVAL_SEED", seed)
+        return runner._schedule("poisson", 256, 32)
+
+    assert schedule("21") == schedule("21") != schedule("1337")
+    assert schedule("") != schedule("")
+    assert runner._schedule("constant", 4, 16) == [0, 1 / 16, 2 / 16, 3 / 16]
+
+
 def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path):
     """Install upstream's unchanged launch scaffold and evaluator stub, and export the agent environment for shells."""
     from inferencebench.assets.scripts import runtime
@@ -1672,6 +1687,9 @@ def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path
     assert "export INFERENCE_BENCH_DATASET_SEED=21\n" in profile and "export INFERENCE_BENCH_EVAL_SEED=1337\n" in profile
     assert f"export INFERENCE_BENCH_METRICS_PATH={task}/metrics_preview.json\n" in profile
     assert "export HOST=127.0.0.1\n" in profile and "export NUM_HOURS=2\n" in profile
+    assert "export INFERENCE_BENCH_ARRIVAL_SEED=21\n" in profile
+    original = load_config("run_configs/original.yaml")["task"]["args"]
+    assert "INFERENCE_BENCH_ARRIVAL_SEED" not in runtime.environment({**options, "seeded_arrivals": original["seeded_arrivals"]})
 
 
 def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):
@@ -1681,7 +1699,8 @@ def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime, "INFERENCE", tmp_path / "inference")
     monkeypatch.setattr(runtime, "ARTIFACTS", tmp_path / "artifacts")
     commands = []
-    monkeypatch.setattr(runtime, "run_upstream", lambda command, log, **kwargs: commands.append(command))
+    envs = []
+    monkeypatch.setattr(runtime, "run_upstream", lambda command, log, env=None, **kwargs: (commands.append(command), envs.append(env)))
     options = upstream_options(request_limit=10)
     folder = runtime.speed_baseline(options)
     assert folder == tmp_path / "inference/baselines/speed/torch/inference_scenario_a_input_heavy/mistralai_Mistral-7B-Instruct-v0.3"
@@ -1692,6 +1711,8 @@ def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):
     assert flags["--out-root"] == str(tmp_path / "inference/baselines/speed/torch")
     assert flags["--registry"] == str(tmp_path / "inference/baselines/speed/torch/mistralai_Mistral-7B-Instruct-v0.3.json")
     assert flags["--request-timeout-s"] == "900" and flags["--concurrency-override"] == "1" and flags["--request-limit"] == "10"
+    # The baseline replays the held-out seed's arrivals, as final scoring does.
+    assert envs == [{"INFERENCE_BENCH_ARRIVAL_SEED": "1337"}]
 
     (tmp_path / "artifacts/cached/speed").mkdir(parents=True)
     for name in ["requests.jsonl", "baseline_metrics.json"]:
@@ -1925,7 +1946,7 @@ def test_final_evaluation_uses_upstream_command_and_retries(monkeypatch, tmp_pat
     flags = dict(zip(command[2::2], command[3::2]))
     assert flags["--requests-file"] == str(tmp_path / "inference/baselines/speed/torch/inference_scenario_a_input_heavy/mistralai_Mistral-7B-Instruct-v0.3/requests.jsonl")
     assert flags["--quality-tau"] == "0.95" and flags["--request-limit"] == "10" and "--request-timeout-s" not in flags
-    assert env == {"INFERENCE_BENCH_DATASET_SEED": "1337"} and timeout == 3600 and check is False
+    assert env == {"INFERENCE_BENCH_DATASET_SEED": "1337", "INFERENCE_BENCH_ARRIVAL_SEED": "1337"} and timeout == 3600 and check is False
     attempts.clear()
     monkeypatch.setattr(runtime, "run_upstream", lambda command, log, **kwargs: attempts.append(command) and 1)
     assert runtime.evaluate(options) is None

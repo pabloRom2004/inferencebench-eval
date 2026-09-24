@@ -1,0 +1,18 @@
+diff --git a/src/eval/inference/runner.py b/src/eval/inference/runner.py
+index 0d1182c..9442fe2 100644
+--- a/src/eval/inference/runner.py
++++ b/src/eval/inference/runner.py
+@@ -560,9 +560,12 @@ def _schedule(pattern: str, count: int, rate_per_s: Optional[float]) -> List[flo
+         for i in range(count):
+             delays.append(i / rate_per_s)
+     elif pattern == "poisson":
++        # A harness-set seed makes the arrival schedule reproducible, like the request sampling.
++        seed = os.environ.get("INFERENCE_BENCH_ARRIVAL_SEED", "").strip()
++        rng = random.Random(f"{seed}:arrivals:{rate_per_s}") if seed else random
+         t = 0.0
+         for _ in range(count):
+-            t += random.expovariate(rate_per_s)
++            t += rng.expovariate(rate_per_s)
+             delays.append(t)
+     else:
+         raise ValueError(f"Unknown pattern: {pattern}")
