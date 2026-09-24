@@ -25,6 +25,8 @@ task:
     seeded_arrivals: true
     # Scenario A scores TTFT only; cap its forced outputs to 16 tokens.
     scenario_a_output_tokens: 16
+    # Count output tokens with the model tokenizer on both baseline and submission.
+    retokenize_outputs: true
     request_limit: 10
     quality_samples: 500
     quality_seed: 248

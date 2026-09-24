@@ -157,6 +157,7 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `request_timeout_seconds` | 300 | Per-request timeout |
 | `system_prompt` | `token_budget` | Original task text adapted to token budgeting; `original.yaml` uses the verbatim prompt |
 | `strict_prompt` | `true` | Insert two bullets after the base-model constraint stating the leaderboard's strict rules: no third-party pre-quantized checkpoints, no modifying the evaluation harness. The authors' strict prompt is unreleased; `false` restores the paper's Table 2 prompt |
+| `retokenize_outputs` | `true` | Count output tokens with the model tokenizer after each profile's timing ends, on both sides of the speedup; `original.yaml` keeps upstream's server usage or whitespace words |
 | `scenario_a_output_tokens` | `16` | Cap Scenario A's forced output tokens; TTFT is unaffected and each evaluation skips about 900 decode tokens per request. `original.yaml` keeps upstream's 819 to 1024 |
 | `seeded_arrivals` | `true` | Seed scenario C's Poisson arrivals from the requests' LongBench seed; `original.yaml` keeps upstream's unseeded draw |
 | `automated_tuning` | `false` | Append an explicit instruction requiring automated hyperparameter search; it changes the prompt only, without installing tools or changing scoring |

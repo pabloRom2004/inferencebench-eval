@@ -150,6 +150,7 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `strict_prompt`: insert the leaderboard's strict rules (no third-party pre-quantized checkpoints, no modifying the evaluation harness) after the base-model constraint; `true`. The paper's Table 2 used the plain prompt; the site's dagger-marked rows used a strict prompt whose text is unreleased, so the wording is the port's.
 - `automated_tuning`: append an explicit instruction to use an automated hyperparameter search tool or programmatic search loop instead of manually selecting trials; `false` in both configs. Enable with `-T automated_tuning=true`.
 - `seeded_arrivals`: seed scenario C's Poisson arrival times from the requests' LongBench seed (development seed for the agent's `evaluate.py`, held-out seed for the baseline and final scoring); `true` by default, `false` in the original config, which keeps upstream's unseeded draw.
+- `retokenize_outputs`: count every output's tokens with the model tokenizer after timing ends, for the baseline, the agent's `evaluate.py`, and final scoring alike; `true` by default. Upstream (`original.yaml`, `false`) uses server-reported usage, which stock vLLM omits and the Transformers baseline reports as a word-level chunk count, so both sides fall back to roughly whitespace words.
 - `scenario_a_output_tokens`: cap Scenario A's forced output length for the agent's `evaluate.py`, the speed baseline, and final scoring. Scenario A scores median TTFT at concurrency 1, so decode tokens only cost time; `16` by default (a few tokens so the first streamed chunk always carries text), `null` in the original config, which keeps upstream's 819 to 1024.
 - `agent_seconds`: optimization wall-clock limit, starting after preparation; `36000` (10 hours) by default, `7200` in the original config. The maintained prompt reflects the deadline; `-T agent_seconds=null` removes it. Preparation and final scoring take additional time.
 - RunPod's [provider configuration](src/inferencebench/assets/sandboxes/runpod.yaml) separately allows `7200` seconds for saving the filesystem before grading (`snapshot_timeout_seconds`) and `7200` seconds for initial startup or restoration (`startup_timeout_seconds`). These infrastructure allowances do not extend `agent_seconds`; customize them with `gpu_config`.
@@ -201,6 +202,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 - `seeded_arrivals` seeds scenario C's Poisson arrival times from the requests' LongBench seed (default); `original.yaml` keeps upstream's unseeded draw.
 - `scenario_a_output_tokens` caps scenario A's forced outputs at 16 tokens by default, since the scenario scores TTFT only; `original.yaml` keeps 819 to 1024.
 - Default measures the MMLU-Pro reference with the pinned vLLM server; `original.yaml` keeps the Transformers server.
+- `retokenize_outputs` counts output tokens with the model tokenizer (default); `original.yaml` keeps upstream's usage-or-words count.
 - Remove the shared MMLU-Pro reference cache: each sample measures its own reference during preparation (minutes with vLLM).
 
 ### [15] - 2026-09-21

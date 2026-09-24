@@ -1,0 +1,32 @@
+diff --git a/src/eval/inference/runner.py b/src/eval/inference/runner.py
+index d711aa7..003e693 100644
+--- a/src/eval/inference/runner.py
++++ b/src/eval/inference/runner.py
+@@ -707,6 +707,19 @@ def _count_tokens(text: str) -> int:
+     return len(text.split())
+ 
+ 
++def _retokenize_outputs(results: List[Dict[str, Any]]) -> None:
++    # A harness-set flag recounts every output with the model tokenizer after timing ends,
++    # so server-reported usage and whitespace words never set the token count.
++    if os.environ.get("INFERENCE_BENCH_RETOKENIZE_OUTPUTS", "").strip() != "1":
++        return
++    tokenizer = _get_tokenizer(os.environ["INFERENCE_BENCH_BASE_MODEL"])
++    if tokenizer is None:
++        raise RuntimeError("Output retokenization is enabled but the model tokenizer could not be loaded")
++    for result in results:
++        if result.get("success"):
++            result["tokens"] = len(tokenizer.encode(result["text"], add_special_tokens=False))
++
++
+ def _validate_json(text: str) -> bool:
+     try:
+         json.loads(text)
+@@ -892,6 +905,7 @@ async def _run_profile(
+ 
+         await asyncio.gather(*tasks)
+ 
++    _retokenize_outputs(results)
+     wall_start = min((r["start"] for r in results), default=time.perf_counter())
+     wall_end = max((r["end"] for r in results), default=wall_start)
+ 

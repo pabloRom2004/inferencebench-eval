@@ -249,6 +249,7 @@ def test_config_dataset_and_provenance():
         "quality_reference_backend",
         "seeded_arrivals",
         "scenario_a_output_tokens",
+        "retokenize_outputs",
     }
     assert {
         key: value
@@ -1566,7 +1567,7 @@ def test_vendored_upstream_matches_pinned_commit():
     lock = vendored.upstream_lock()
     assert vendored.git_tree_hash(vendored.UPSTREAM) == lock["tree"]
     assert len(lock["commit"]) == 40 and lock["source"].startswith("https://github.com/")
-    assert [patch.name for patch in vendored.PATCHES] == ["0001-repair-head-truncation-boundary.patch", "0002-seed-poisson-arrivals.patch", "0003-cap-speed-output-tokens.patch"]
+    assert [patch.name for patch in vendored.PATCHES] == ["0001-repair-head-truncation-boundary.patch", "0002-seed-poisson-arrivals.patch", "0003-cap-speed-output-tokens.patch", "0004-retokenize-output-tokens.patch"]
     assert vendored.scenario_directories() == {
         "A": "inference_scenario_a_input_heavy", "B": "inference_scenario_b_output_heavy",
         "C": "inference_scenario_c_high_load", "D": "inference_scenario_d_general",
@@ -1671,6 +1672,31 @@ def test_patch_caps_speed_output_tokens(tmp_path, monkeypatch):
     assert runner._output_token_cap(900) == 16 and runner._output_token_cap(8) == 8
 
 
+def test_patch_retokenizes_outputs_after_timing(tmp_path, monkeypatch):
+    """Recount successful outputs with the model tokenizer only when enabled, overriding reported usage and word counts."""
+    runner, _ = load_patched_runner(tmp_path, monkeypatch, True)
+
+    class Tokenizer:
+        """Tokenize per character so counts differ from both words and reported usage."""
+
+        def encode(self, text, add_special_tokens=False):
+            """Return one token per character."""
+            return list(text)
+
+    monkeypatch.setattr(runner, "_get_tokenizer", lambda model: Tokenizer())
+    monkeypatch.setenv("INFERENCE_BENCH_BASE_MODEL", "org/model")
+    results = [{"success": True, "text": "ab cd", "tokens": 99}, {"success": False, "text": "", "tokens": 0}]
+    monkeypatch.delenv("INFERENCE_BENCH_RETOKENIZE_OUTPUTS", raising=False)
+    runner._retokenize_outputs(results)
+    assert [r["tokens"] for r in results] == [99, 0]
+    monkeypatch.setenv("INFERENCE_BENCH_RETOKENIZE_OUTPUTS", "1")
+    runner._retokenize_outputs(results)
+    assert [r["tokens"] for r in results] == [5, 0]
+    monkeypatch.setattr(runner, "_get_tokenizer", lambda model: None)
+    with pytest.raises(RuntimeError, match="tokenizer could not be loaded"):
+        runner._retokenize_outputs(results)
+
+
 def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path):
     """Install upstream's unchanged launch scaffold and evaluator stub, and export the agent environment for shells."""
     from inferencebench.assets.scripts import runtime
@@ -1705,6 +1731,8 @@ def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path
     assert "export INFERENCE_BENCH_OUTPUT_TOKEN_CAP=16\n" in profile
     assert "INFERENCE_BENCH_OUTPUT_TOKEN_CAP" not in runtime.environment({**options, "scenario": "D"})
     assert "INFERENCE_BENCH_OUTPUT_TOKEN_CAP" not in runtime.environment({**options, "scenario_a_output_tokens": original["scenario_a_output_tokens"]})
+    assert "export INFERENCE_BENCH_RETOKENIZE_OUTPUTS=1\n" in profile
+    assert "INFERENCE_BENCH_RETOKENIZE_OUTPUTS" not in runtime.environment({**options, "retokenize_outputs": original["retokenize_outputs"]})
 
 
 def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):
@@ -1727,7 +1755,7 @@ def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):
     assert flags["--registry"] == str(tmp_path / "inference/baselines/speed/torch/mistralai_Mistral-7B-Instruct-v0.3.json")
     assert flags["--request-timeout-s"] == "900" and flags["--concurrency-override"] == "1" and flags["--request-limit"] == "10"
     # The baseline replays the held-out seed's arrivals, as final scoring does.
-    assert envs == [{"INFERENCE_BENCH_ARRIVAL_SEED": "1337", "INFERENCE_BENCH_OUTPUT_TOKEN_CAP": "16"}]
+    assert envs == [{"INFERENCE_BENCH_ARRIVAL_SEED": "1337", "INFERENCE_BENCH_RETOKENIZE_OUTPUTS": "1", "INFERENCE_BENCH_OUTPUT_TOKEN_CAP": "16"}]
 
     (tmp_path / "artifacts/cached/speed").mkdir(parents=True)
     for name in ["requests.jsonl", "baseline_metrics.json"]:
@@ -1947,7 +1975,7 @@ def test_final_evaluation_uses_upstream_command_and_retries(monkeypatch, tmp_pat
     flags = dict(zip(command[2::2], command[3::2]))
     assert flags["--requests-file"] == str(tmp_path / "inference/baselines/speed/torch/inference_scenario_a_input_heavy/mistralai_Mistral-7B-Instruct-v0.3/requests.jsonl")
     assert flags["--quality-tau"] == "0.95" and flags["--request-limit"] == "10" and "--request-timeout-s" not in flags
-    assert env == {"INFERENCE_BENCH_DATASET_SEED": "1337", "INFERENCE_BENCH_ARRIVAL_SEED": "1337", "INFERENCE_BENCH_OUTPUT_TOKEN_CAP": "16"} and timeout == 3600 and check is False
+    assert env == {"INFERENCE_BENCH_DATASET_SEED": "1337", "INFERENCE_BENCH_ARRIVAL_SEED": "1337", "INFERENCE_BENCH_RETOKENIZE_OUTPUTS": "1", "INFERENCE_BENCH_OUTPUT_TOKEN_CAP": "16"} and timeout == 3600 and check is False
     attempts.clear()
     monkeypatch.setattr(runtime, "run_upstream", lambda command, log, **kwargs: attempts.append(command) and 1)
     assert runtime.evaluate(options) is None

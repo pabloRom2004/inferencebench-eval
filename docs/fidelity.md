@@ -4,11 +4,13 @@ Reviewed against the [paper](https://arxiv.org/abs/2607.20468) and released
 [implementation at `24cdf88`](https://github.com/aisa-group/InferenceBench/tree/24cdf88f6a4e14ed85d665aa132cecccb3ee95ef).
 The repository is vendored byte-for-byte under `src/inferencebench/upstream/`;
 a test recomputes its git tree hash against `upstream.lock`. Each sample installs
-that copy in its sandbox, applies the three patches in `patches/` (the sampler's
+that copy in its sandbox, applies the four patches in `patches/` (the sampler's
 boundary-token repair; optional seeding of scenario C's Poisson arrivals,
 which upstream draws unseeded; and an optional cap on forced speed output
-tokens, which `default.yaml` sets to 16 for scenario A only; `original.yaml`
-enables neither), and runs upstream's own commands for every measured
+tokens, which `default.yaml` sets to 16 for scenario A only; and optional
+recounting of output tokens with the model tokenizer, since upstream counts
+whitespace words for vLLM and streamed chunks for its Transformers baseline;
+`original.yaml` enables none of these), and runs upstream's own commands for every measured
 stage. The subject prompt, judge rubric, launcher template, evaluator stub, and
 scenario definitions are read from that copy rather than re-typed.
 

@@ -79,8 +79,10 @@ def environment(options):
 
 
 def evaluator_env(options, seed) -> dict[str, str]:
-    """Configure the patched evaluator's arrival seed and Scenario A output cap when enabled."""
+    """Configure the patched evaluator's arrival seed, Scenario A output cap, and output token counting when enabled."""
     env = {"INFERENCE_BENCH_ARRIVAL_SEED": str(seed)} if options["seeded_arrivals"] else {}
+    if options["retokenize_outputs"]:
+        env["INFERENCE_BENCH_RETOKENIZE_OUTPUTS"] = "1"
     if options["scenario"] == "A" and options["scenario_a_output_tokens"] is not None:
         env["INFERENCE_BENCH_OUTPUT_TOKEN_CAP"] = str(options["scenario_a_output_tokens"])
     return env
