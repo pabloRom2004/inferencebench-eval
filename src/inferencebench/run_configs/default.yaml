@@ -28,8 +28,8 @@ task:
     request_limit: 10
     quality_samples: 500
     quality_seed: 248
-    # The original Transformers server, measured once per model and GPU and shared from run-artifacts/baselines/; vllm measures in minutes but scores a few questions higher.
-    quality_reference_backend: transformers
+    # A pinned vLLM server measures the MMLU-Pro reference in minutes; it scores a few questions above the original Transformers server, raising the gate slightly.
+    quality_reference_backend: vllm
     quality_tau: 0.95
     quality_concurrency: 4
     quality_baseline_max_attempts: 2

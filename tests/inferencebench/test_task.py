@@ -2043,7 +2043,7 @@ def test_shared_measurements_reuse(monkeypatch, tmp_path):
 
     def run(**overrides):
         """Run one sample through the real preparation solver and return its metadata."""
-        task = inference_bench(**{"scenarios": "A", "seed_pairs": [[21, 1337]], "agent_seconds": 2, **overrides})
+        task = inference_bench(**{"scenarios": "A", "seed_pairs": [[21, 1337]], "agent_seconds": 2, "quality_reference_backend": "transformers", **overrides})
         task.sandbox = None
         [log] = inspect_eval(task, solver=generate(), model="mockllm/subject", model_roles={"integrity": judge_model()}, display="none", log_dir="logs")
         assert log.status == "success", log.error
@@ -2121,7 +2121,7 @@ def test_prepare_failure_retains_measured_speed_baseline(monkeypatch, tmp_path):
 
 
 def test_quality_reference_identity_is_shared_by_both_configurations():
-    """Key the shared reference only by what determines the measurement, so default and original on one model resolve to one entry."""
+    """Key the shared reference only by what determines the measurement, so configurations with the same backend on one model resolve to one entry."""
     from inferencebench.environment import (
         quality_reference_identity,
         speed_baseline_identity,
@@ -2129,9 +2129,10 @@ def test_quality_reference_identity_is_shared_by_both_configurations():
 
     default = inference_bench(scenarios="A", seed_pairs=[[21, 1337]]).dataset[0].metadata
     original = inference_bench(**{**load_config("run_configs/original.yaml")["task"]["args"], "scenarios": "D", "seed_pairs": [[999, 777]]}).dataset[0].metadata
-    identity = quality_reference_identity(default, "NVIDIA H100 80GB HBM3")
-    assert identity == quality_reference_identity(original, "NVIDIA H100 80GB HBM3")
+    identity = quality_reference_identity(original, "NVIDIA H100 80GB HBM3")
+    assert identity == quality_reference_identity({**default, "quality_reference_backend": "transformers"}, "NVIDIA H100 80GB HBM3")
     assert identity["backend"] == "transformers" and identity["concurrency"] == 1 and identity["quality_seed"] == 248 and identity["quality_samples"] == 500
+    assert quality_reference_identity(default, "NVIDIA H100 80GB HBM3")["backend"] == "vllm"
     assert not {"scenario", "eval_seed", "dev_seed", "request_limit", "config_defaults", "agent_seconds", "system_prompt"} & identity.keys()
     assert quality_reference_identity({**default, "quality_reference_backend": "vllm"}, "NVIDIA H100 80GB HBM3") != identity
     assert quality_reference_identity(default, "NVIDIA A100 80GB PCIe") != identity

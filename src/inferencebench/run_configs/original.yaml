@@ -14,6 +14,7 @@ task:
     baseline_dtype: float16
     # Optimizing agent's context window; null uses Inspect's model metadata.
     context_length: null
+    # Original 2h limit
     agent_seconds: 7200
     system_prompt: original
     # The paper's Table 2 used false; the site's dagger-marked rows used the strict prompt.

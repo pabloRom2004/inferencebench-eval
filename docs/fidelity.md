@@ -108,15 +108,16 @@ and [environment defaults](https://github.com/aisa-group/InferenceBench/blob/24c
 The reference is measured once per model, backend, question selection,
 precision, upstream commit and GPU model, and shared with every later sample
 from `run-artifacts/baselines/`, as upstream's precomputed registry is shared
-across its runs; both configurations resolve to the same entry. Both use the
-float16 Transformers server (`quality_reference_backend: transformers`), which
-answers the fixed 500 questions (seed 248) in about 57 minutes on an H100 and
+across its runs; configurations with the same backend resolve to the same
+entry. `original.yaml` uses the float16 Transformers server
+(`quality_reference_backend: transformers`), which answers the fixed 500 questions (seed 248) in about 57 minutes on an H100 and
 scored 151/500 on 2026-09-10 and 2026-09-17, so the 95% gate requires 144
 correct from a submission. The pinned vLLM 0.19.0 server answers them in under
 four minutes but scored 156 and 154 on the same questions (480 identical parsed
 answers): float16 kernel numerics flip a few near-tied greedy choices, a
 difference inside the sampling noise of 500 questions but comparable to the
-gate's margin, so vLLM is available and not the default. A reference request
+gate's margin. `default.yaml` uses vLLM for speed of preparation; its higher
+reference makes the gate require about 147 to 149 correct instead of 144. A reference request
 that times out is retried once on its own in both configurations; upstream
 counts it as incorrect instead, a difference of at most one question in the
 gate threshold. Each optimized server still answers every question; no agent or
