@@ -220,8 +220,8 @@ def test_config_dataset_and_provenance():
     assert task.dataset[0].metadata["quality_samples"] == 500
     assert task.config.attempt_timeout == config["generate_config"]["attempt_timeout"]
     assert task.token_limit == 100000000
-    assert task.dataset[0].metadata["agent_seconds"] is None
-    assert "no wall-clock optimization limit" in task.dataset[0].input
+    assert task.dataset[0].metadata["agent_seconds"] == 36000
+    assert "10 hours of wall-clock optimization time" in task.dataset[0].input
     assert "Kernel Optimization" in task.dataset[0].input
     assert "{model}" not in task.dataset[0].input
     assert "24cdf88" in PROMPTS["original"].origin

@@ -2,7 +2,7 @@
 
 [InferenceBench](https://arxiv.org/abs/2607.20468) evaluates agents that deploy and optimize an inference server for Mistral-7B-Instruct-v0.3 on one H100 80GB. The original benchmark gives each agent two hours, root access, the Internet, cached model weights, and an OpenAI-compatible serving contract.
 
-This Inspect port vendors the [original repository](https://github.com/aisa-group/InferenceBench/tree/24cdf88f6a4e14ed85d665aa132cecccb3ee95ef) byte-for-byte under `src/inferencebench/upstream/`, installs it into every sandbox with the patches in `src/inferencebench/patches/`, and drives its own entrypoints: the sampler caches, baseline and reference precompute scripts, task `evaluate.py`, launch scaffold, timer, task prompt, quality parser, and integrity rubric. The default solver is Inspect ReAct with 100 million input-plus-output tokens per attempt and no optimization deadline. A separate original configuration runs Claude Code 2.1.114 through Inspect SWE and resumes early exits until the time budget expires.
+This Inspect port vendors the [original repository](https://github.com/aisa-group/InferenceBench/tree/24cdf88f6a4e14ed85d665aa132cecccb3ee95ef) byte-for-byte under `src/inferencebench/upstream/`, installs it into every sandbox with the patches in `src/inferencebench/patches/`, and drives its own entrypoints: the sampler caches, baseline and reference precompute scripts, task `evaluate.py`, launch scaffold, timer, task prompt, quality parser, and integrity rubric. The default solver is Inspect ReAct with 100 million input-plus-output tokens per attempt and a 10-hour optimization deadline. A separate original configuration runs Claude Code 2.1.114 through Inspect SWE and resumes early exits until the time budget expires.
 
 ## Usage
 
@@ -144,7 +144,7 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `max_model_len` | 32768 | Original evaluator and baseline context limit |
 | `baseline_dtype` | `float16` | Precision of the Transformers speed baseline and the reference server; `bfloat16` for bf16-native models |
 | `context_length` | `null` | Optimizing model's context window; used by Inspect compaction and model bridges |
-| `agent_seconds` | `null` | Optional optimization wall-clock limit, reflected in the maintained prompt; starts after preparation and excludes final scoring. `original.yaml` uses 7200 seconds |
+| `agent_seconds` | `36000` | Optimization wall-clock limit (`null` removes it), reflected in the maintained prompt; starts after preparation and excludes final scoring. `original.yaml` uses 7200 seconds |
 | `eval_config.token_limit` | 100000000 | Total input-plus-output tokens per attempt; override with `--token-limit` |
 | `request_limit` | 10 | Requests per load profile; `null` requests the original scenario count |
 | `quality_samples` | 500 | MMLU-Pro quality-gate questions |

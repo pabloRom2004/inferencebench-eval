@@ -14,7 +14,8 @@ task:
     baseline_dtype: float16
     # Optimizing agent's context window; null uses Inspect's model metadata.
     context_length: null
-    agent_seconds: null
+    # Ten-hour wall-clock cap alongside the token limit.
+    agent_seconds: 36000
     system_prompt: token_budget
     # Leaderboard strict rules: no third-party pre-quantized checkpoints, no harness edits.
     strict_prompt: true
