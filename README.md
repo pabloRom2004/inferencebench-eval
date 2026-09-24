@@ -93,7 +93,6 @@ The package root contains the benchmark: [task.py](src/inferencebench/task.py), 
 | [utils/sandboxes/](src/inferencebench/utils/sandboxes/) | Reusable Kubernetes configuration rendering, Modal filesystem operations, and RunPod allocation, SSH/file transport, and cleanup. |
 | [utils/](src/inferencebench/utils/) | Shared resource reminders, recovery bundles, and YAML loading. |
 | [assets/sandboxes/](src/inferencebench/assets/sandboxes/) | Provider configuration YAML. |
-| [diagnostics/](src/inferencebench/diagnostics/) | GPU-free deployment and model-provider probe. |
 | [run_configs/](src/inferencebench/run_configs/) | Only `default.yaml` and `original.yaml`; harnesses and experiment variants are parameters. |
 
 The Python files under `utils/` are byte-for-byte identical in both benchmarks and do not import task modules or prompts. The harness machinery comes from ExploitBench; the shared Modal and RunPod operations were extracted from InferenceBench's existing providers. Maintain shared fixes in ExploitBench, copy the affected files to InferenceBench, and test both repositories. Provider dependencies are needed only when using that provider; ExploitBench's development environment includes them for utility type checks (the Modal adapter requires Python 3.12 or later).

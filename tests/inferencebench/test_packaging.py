@@ -27,25 +27,3 @@ def test_modal_build_context_retains_bootstrap_assets(monkeypatch, tmp_path):
     for line in dockerfile.read_text().splitlines():
         if line.startswith("COPY "):
             assert (context / line.split()[1]).is_file()
-
-
-def test_provider_probe_has_no_gpu_or_benchmark_workload(tmp_path):
-    """Run the deployment probe through Inspect while keeping GPU allocation absent."""
-    from inspect_ai import eval as inspect_eval
-    from inspect_ai.model import ModelOutput, get_model
-
-    from inferencebench import provider_probe
-
-    task = provider_probe()
-    assert task.sandbox is None
-    [log] = inspect_eval(
-        task,
-        model=get_model("mockllm/probe", custom_outputs=[ModelOutput.from_content("mockllm/probe", "hello")]),
-        log_dir="logs",
-        display="none",
-    )
-    try:
-        assert log.status == "success"
-        assert log.samples[0].scores["includes"].value == "C"
-    finally:
-        Path(log.location).unlink()
