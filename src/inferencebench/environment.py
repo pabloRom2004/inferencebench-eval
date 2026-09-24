@@ -20,9 +20,10 @@ from inspect_ai.hooks import Hooks, hooks
 from inspect_ai.log import transcript
 from inspect_ai.model import ModelInfo, get_model, get_model_info, set_model_info
 from inspect_ai.solver import Solver, solver
-from inspect_ai.util import sandbox, sandboxenv, store
+from inspect_ai.util import ResumeReport, sandbox, sandboxenv, store
 
 from inferencebench.dataset import num_hours_text
+from inferencebench.harness_default import reschedule_deadline
 from inferencebench.prompts import ASSETS
 from inferencebench.utils.run_config import load_config
 from inferencebench.utils.sandboxes.modal import FileSystemModalSandbox
@@ -35,6 +36,15 @@ UPSTREAM_ROOT = "/opt/inferencebench"
 # Speed baselines taken once per workload and GPU model and shared by later samples, like upstream's precomputed registries.
 BASELINE_CACHE = Path("run-artifacts") / "baselines"
 SPEED_BASELINE_FILES = ("requests.jsonl", "baseline_metrics.json")
+# Checkpoints keep the workspace and each native CLI's resumable session, not installed packages or weights.
+# The CLIs run as root with HOME=/home/agent; Codex keeps its session inside the workspace.
+CHECKPOINT_PATHS = [
+    "/home/agent/task",
+    "/home/agent/.claude",
+    "/home/agent/.gemini",
+    "/home/agent/.kimi-code",
+    "/home/agent/.local/share/opencode",
+]
 
 
 def gpu_model(inventory: str) -> str:
@@ -189,6 +199,8 @@ def prepare_environment() -> Solver:
         )
         folder.mkdir(parents=True)
         store().set("artifacts", str(folder.resolve()))
+        # A checkpoint restore replaces the store; grading keeps this attempt's own preparation.
+        state.metadata["artifacts"] = str(folder.resolve())
 
         # Record the GPU allocated to this sample.
         state.metadata["agent_sandbox_id"] = env.resource_id
@@ -264,23 +276,53 @@ def prepare_environment() -> Solver:
             "folder": str(cached.resolve()) if cached is not None else None,
         }
 
+        if state.metadata["checkpoint"]:
+            # Restic cannot save a capture path that does not exist yet.
+            await checked_exec(env, ["mkdir", "-p", *CHECKPOINT_PATHS], 30)
+
         seconds = state.metadata["agent_seconds"]
         deadline = time.time() + seconds if seconds is not None else None
         store().set("deadline", deadline)
-        if deadline is not None:
-            # Upstream's timer script prints the remaining budget in hours and minutes.
-            await checked_exec(env, [
-                "bash", f"{UPSTREAM_ROOT}/src/utils/create_timer.sh", num_hours_text(seconds), "/home/agent/task/timer.sh",
-            ], 30)
-        else:
-            await env.write_file(
-                "/home/agent/task/timer.sh",
-                '#!/bin/sh\necho "No wall-clock limit; use the token-budget reminders."\n',
-            )
-            await checked_exec(env, ["chmod", "+x", "/home/agent/task/timer.sh"], 30)
+        await write_timer(env, seconds)
         return state
 
     return solve
+
+
+async def write_timer(env, seconds: float | None) -> None:
+    """Install upstream's timer for the remaining optimization time, or a note that only the token budget applies."""
+    if seconds is not None:
+        # Upstream's timer script prints the remaining budget in hours and minutes.
+        await checked_exec(env, [
+            "bash", f"{UPSTREAM_ROOT}/src/utils/create_timer.sh", num_hours_text(seconds), "/home/agent/task/timer.sh",
+        ], 30)
+    else:
+        await env.write_file(
+            "/home/agent/task/timer.sh",
+            '#!/bin/sh\necho "No wall-clock limit; use the token-budget reminders."\n',
+        )
+        await checked_exec(env, ["chmod", "+x", "/home/agent/task/timer.sh"], 30)
+
+
+async def record_checkpoint_time(state) -> None:
+    """Store when this checkpoint was taken, so a restore can return the optimization time lost after it."""
+    store().set("checkpoint_saved_at", time.time())
+
+
+async def resume_environment(state, attempt) -> ResumeReport:
+    """Grade with this attempt's fresh preparation and extend the deadline by the time between the last checkpoint and this restore."""
+    store().set("artifacts", state.metadata["artifacts"])
+    deadline, saved = store().get("deadline"), store().get("checkpoint_saved_at")
+    data = {"attempt": attempt, "checkpoint_saved_at": saved, "previous_deadline": deadline}
+    if attempt == "resume" and deadline is not None and saved is not None:
+        # Reinstalling what the checkpoint left out happens after this point and counts against the agent.
+        downtime = time.time() - saved
+        deadline += downtime
+        store().set("deadline", deadline)
+        reschedule_deadline(deadline)
+        await write_timer(gpu_environment(), max(0, deadline - time.time()))
+        data.update(downtime_seconds=downtime, deadline=deadline)
+    return ResumeReport(data=data)
 
 
 async def restart_for_scoring(state, include_transcript: bool):

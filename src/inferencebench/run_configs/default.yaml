@@ -37,6 +37,11 @@ task:
     quality_baseline_max_attempts: 2
     server_wait_seconds: 900
     request_timeout_seconds: 300
+    # Save the task directory, native CLI sessions, and conversation so a crashed sample resumes on a fresh GPU.
+    checkpoint: true
+    # Save cadence, and the consecutive failed saves tolerated before the attempt errors.
+    checkpoint_seconds: 600
+    checkpoint_max_failures: 3
     scorer:
       name: inferencebench.scorers.inference_speedup
       args:
@@ -76,7 +81,7 @@ generate_config:
   max_tokens: null
   seed: null
   reasoning_effort: null
-  # Long runs ride out provider outages instead of failing the sample.
+  # A provider outage outlasting these retries fails the attempt, which resumes from its last checkpoint.
   max_retries: 20
   attempt_timeout: 2700
 
@@ -101,6 +106,6 @@ eval_config:
   # Total input-plus-output tokens per sample, including cached input.
   token_limit: 100000000
   time_limit: null
-  # Grade the saved submission after a solver error, retaining the error in the log.
-  score_on_error: true
+  # A crashed attempt resumes from its checkpoint on the next eval-set retry instead of being graded.
+  score_on_error: false
   max_samples: 1

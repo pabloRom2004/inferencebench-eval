@@ -1,5 +1,6 @@
 import asyncio
 import time
+from contextvars import ContextVar
 from functools import partial, wraps
 from typing import Any
 
@@ -32,6 +33,9 @@ from inferencebench.utils.reminders import summary_request, token_reminder
 from inferencebench.utils.run_config import load_config
 
 DEFAULT_AGENT_ARGS = load_config()["solver"]["args"]
+_DEADLINE: ContextVar[asyncio.Timeout | None] = ContextVar(
+    "inferencebench_deadline", default=None
+)
 
 
 @solver
@@ -93,6 +97,7 @@ def react_agent(
 
     async def on_continue(state: AgentState) -> bool | str:
         """Keep ordinary tool turns running and nudge early answers when enabled."""
+        await require_live_sandbox(state)
         has_tools = bool(state.output.message.tool_calls)
         if not has_tools and not nudge_prompt:
             return False
@@ -124,6 +129,17 @@ def react_agent(
         return await agent(state, generate)
 
     return with_deadline(solve)
+
+
+async def require_live_sandbox(state: AgentState) -> None:
+    """Fail the attempt when a tool lost a sandbox that no longer answers, so a checkpoint retry resumes on a fresh GPU."""
+    for message in reversed(state.messages):
+        if message.role != "tool":
+            return
+        if message.error is not None and message.error.type == "sandbox_unavailable":
+            # Inspect reports an unreachable sandbox to the model; a dead pod would otherwise absorb every later turn.
+            await sandbox().exec(["true"], timeout=60)
+            return
 
 
 def budget_reminder() -> str:
@@ -166,6 +182,7 @@ def with_deadline(solve: Solver | Agent):
         deadline = asyncio.timeout(
             max(0, end - time.time()) if end is not None else None
         )
+        token = _DEADLINE.set(deadline)
         try:
             async with deadline:
                 return await solve(state, *args)
@@ -175,8 +192,19 @@ def with_deadline(solve: Solver | Agent):
                 raise
             state.metadata["agent_deadline_reached"] = True
             return state
+        finally:
+            _DEADLINE.reset(token)
 
     return run
+
+
+def reschedule_deadline(end: float) -> None:
+    """Move the running agent's deadline after a checkpoint restore has replaced the setup-owned one."""
+    deadline = _DEADLINE.get()
+    if deadline is not None:
+        deadline.reschedule(
+            asyncio.get_running_loop().time() + max(0, end - time.time())
+        )
 
 
 async def file_cli_prompts(state: AgentState) -> None:

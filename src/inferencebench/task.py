@@ -1,4 +1,5 @@
 import math
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -6,10 +7,21 @@ from inspect_ai import Epochs, Task, task
 from inspect_ai.agent import as_solver
 from inspect_ai.model import GenerateConfig
 from inspect_ai.solver import Solver
-from inspect_ai.util import SandboxEnvironmentSpec, registry_create
+from inspect_ai.util import (
+    CheckpointConfig,
+    SandboxEnvironmentSpec,
+    TimeInterval,
+    registry_create,
+)
 
 from inferencebench.dataset import get_inference_dataset
-from inferencebench.environment import prepare_environment, retain_failed_submission
+from inferencebench.environment import (
+    CHECKPOINT_PATHS,
+    prepare_environment,
+    record_checkpoint_time,
+    resume_environment,
+    retain_failed_submission,
+)
 from inferencebench.scorers import scorers_from_spec
 from inferencebench.utils.run_config import load_config
 
@@ -44,6 +56,11 @@ def inference_bench(
     quality_baseline_max_attempts: int = DEFAULT_TASK_ARGS["quality_baseline_max_attempts"],
     server_wait_seconds:     int = DEFAULT_TASK_ARGS["server_wait_seconds"],
     request_timeout_seconds: int = DEFAULT_TASK_ARGS["request_timeout_seconds"],
+
+    # Checkpoint recovery.
+    checkpoint:              bool = DEFAULT_TASK_ARGS["checkpoint"],
+    checkpoint_seconds:      int = DEFAULT_TASK_ARGS["checkpoint_seconds"],
+    checkpoint_max_failures: int = DEFAULT_TASK_ARGS["checkpoint_max_failures"],
 
     # Prompt and scoring.
     system_prompt:           str = DEFAULT_TASK_ARGS["system_prompt"],
@@ -85,9 +102,13 @@ def inference_bench(
         raise ValueError("seeded_arrivals must be a boolean")
     if type(retokenize_outputs) is not bool:
         raise ValueError("retokenize_outputs must be a boolean")
+    if type(checkpoint) is not bool:
+        raise ValueError("checkpoint must be a boolean")
+    if type(checkpoint_max_failures) is not int or checkpoint_max_failures < 0:
+        raise ValueError("checkpoint_max_failures must be a nonnegative integer")
     if baseline_dtype not in {"float16", "bfloat16", "float32"}:
         raise ValueError("baseline_dtype must be float16, bfloat16, or float32")
-    durations = [server_wait_seconds, request_timeout_seconds]
+    durations = [server_wait_seconds, request_timeout_seconds, checkpoint_seconds]
     if agent_seconds is not None:
         durations.append(agent_seconds)
     if any(type(value) is not int or value <= 0 for value in durations):
@@ -118,6 +139,13 @@ def inference_bench(
         fail_on_error=config["eval_config"].get("fail_on_error"),
         continue_on_fail=config["eval_config"].get("continue_on_fail"),
         score_on_error=config["eval_config"].get("score_on_error"),
+        checkpoint=CheckpointConfig(
+            trigger=TimeInterval(every=timedelta(seconds=checkpoint_seconds)),
+            sandbox_paths={"default": CHECKPOINT_PATHS},
+            max_consecutive_failures=checkpoint_max_failures,
+        ) if checkpoint else None,
+        on_checkpoint=record_checkpoint_time,
+        on_resume=resume_environment,
         version=load_config("eval.yaml")["version"],
         metadata=load_config("eval.yaml"),
     )

@@ -89,6 +89,19 @@ AUTOMATED_TUNING = Prompt(
     inspect_parameter="automated_tuning",
 )
 
+CHECKPOINT_RESUME = Prompt(
+    title="checkpoint_resume",
+    prompt=(
+        "Your run may be interrupted and resumed on a fresh machine. Only /home/agent/task and your conversation are restored, "
+        "so keep model weights and other large files outside /home/agent/task. After a resume, reinstall any missing packages, "
+        "re-download or regenerate any missing weights, and restart your server."
+    ),
+    role="subject",
+    origin="Inspect port; checkpoint recovery requested by Pablo on 2026-09-24",
+    origin_note="Appended to the task prompt only when checkpointing is enabled, so the original prompt is unchanged by default in original.yaml. Checkpoints capture the task directory and native CLI sessions, not installed packages, weights, or running servers.",
+    inspect_parameter="checkpoint",
+)
+
 TOKEN_BUDGET_DESCRIPTION = Prompt(
     title="token_budget_description",
     prompt="Use the full token budget shown in the live reminders; there is no wall-clock optimization limit.",
@@ -155,6 +168,7 @@ PROMPTS.update(
         for prompt in [
             STRICT_RULES,
             AUTOMATED_TUNING,
+            CHECKPOINT_RESUME,
             TOKEN_BUDGET_DESCRIPTION,
             TIMED_BUDGET_DESCRIPTION,
             ORIGINAL_CLI_CONTEXT,

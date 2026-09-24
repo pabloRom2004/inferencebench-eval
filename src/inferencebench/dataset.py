@@ -4,6 +4,7 @@ from inspect_ai.dataset import MemoryDataset, Sample
 
 from inferencebench.prompts import (
     AUTOMATED_TUNING,
+    CHECKPOINT_RESUME,
     STRICT_RULES,
     TIMED_BUDGET_DESCRIPTION,
     TOKEN_BUDGET_DESCRIPTION,
@@ -92,6 +93,8 @@ def get_inference_dataset(
         prompt = render_prompt(prompt, options, scenario)
         if options["automated_tuning"]:
             prompt += "\n\n## Automated hyperparameter tuning\n\n" + AUTOMATED_TUNING.prompt
+        if options["checkpoint"]:
+            prompt += "\n\n" + CHECKPOINT_RESUME.prompt
 
         for dev_seed, eval_seed in seed_pairs:
             samples.append(

@@ -18,7 +18,7 @@ from inspect_ai.util import ExecResult, store
 
 from inferencebench import default_agent, inference_bench, original_agent, react_agent
 from inferencebench.metrics import aggregate_speedup, complete_mean, performance
-from inferencebench.prompts import AUTOMATED_TUNING, PROMPTS
+from inferencebench.prompts import AUTOMATED_TUNING, CHECKPOINT_RESUME, PROMPTS
 from inferencebench.scorers import parse_judgment
 from inferencebench.tools import web_search
 from inferencebench.utils.run_config import load_config
@@ -119,6 +119,7 @@ def local_task(monkeypatch, tmp_path):
                 "deadline", time.time() + seconds if seconds is not None else None
             )
             store().set("artifacts", str(tmp_path))
+            state.metadata["artifacts"] = str(tmp_path)
             store().set("workspace_env", {
                 "INFERENCE_BENCH_BASE_MODEL": state.metadata["base_model"],
                 "INFERENCE_BENCH_MAX_MODEL_LEN": str(state.metadata["max_model_len"]),
@@ -149,7 +150,8 @@ def local_task(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(TASK, "prepare_environment", prepare)
     monkeypatch.setattr(SCORERS, "restart_for_scoring", AsyncMock(return_value=env))
-    task = inference_bench(scenarios="A", seed_pairs=[[21, 1337]], agent_seconds=2)
+    # Checkpoint tests enable saving explicitly; the rest keep their two-second deadline free of save overhead.
+    task = inference_bench(scenarios="A", seed_pairs=[[21, 1337]], agent_seconds=2, checkpoint=False)
     task.sandbox = None
     return task, env
 
@@ -250,7 +252,13 @@ def test_config_dataset_and_provenance():
         "scenario_a_output_tokens",
         "retokenize_outputs",
         "quality_tau",
+        "checkpoint",
     }
+    assert config["task"]["args"]["checkpoint"] and not original["task"]["args"]["checkpoint"]
+    assert task.checkpoint.sandbox_paths == {"default": TASK.CHECKPOINT_PATHS}
+    assert original_task.checkpoint is None
+    assert CHECKPOINT_RESUME.prompt in task.dataset[0].input
+    assert CHECKPOINT_RESUME.prompt not in original_task.dataset[0].input
     assert {
         key: value
         for key, value in original["task"]["args"].items()
@@ -1101,7 +1109,7 @@ def test_registered_solver_error_is_preserved():
 
 @pytest.mark.parametrize("profile", ["default", "original"])
 def test_solver_error_still_scores_submission(local_task, profile):
-    """Grade a partial submission and retain the solver failure in the durable log."""
+    """Grade an original partial submission, leave a checkpointed default attempt to its retry, and retain the failure."""
     _, env = local_task
     task = inference_bench(config_defaults=profile, scenarios="A", seed_pairs=[[21, 1337]])
     task.sandbox = None
@@ -1120,8 +1128,12 @@ def test_solver_error_still_scores_submission(local_task, profile):
     sample = read_eval_log(log.location).samples[0]
     assert sample.error is not None
     assert "agent failed after writing a usable submission" in sample.error.message
-    assert sample.scores["inference_speedup"].value == {"speedup": 2.0}
-    env.terminate.assert_awaited_once()
+    if profile == "default":
+        assert not sample.scores
+        env.terminate.assert_not_awaited()
+    else:
+        assert sample.scores["inference_speedup"].value == {"speedup": 2.0}
+        env.terminate.assert_awaited_once()
 
 
 def test_snapshot_error_preserves_submission(local_task, monkeypatch, tmp_path):
@@ -1497,7 +1509,8 @@ def test_failed_solver_retains_submission(local_task, monkeypatch, tmp_path, fai
     assert log.status == "error"
     sample = read_eval_log(log.location).samples[0]
     assert ("native agent died" if failure == "solver" else "SSH connection failed") in sample.error.message
-    assert sample.scores["inference_speedup"].value == {"speedup": 2.0}
+    # The default profile leaves a crashed attempt to its checkpoint retry instead of grading it.
+    assert not sample.scores
     fs, path = environment.url_to_fs(f"{destination}/artifacts/{sample.uuid}")
     with tarfile.open(fileobj=io.BytesIO(fs.cat(f"{path}/submission.tar.gz"))) as archive:
         assert archive.extractfile("task/start_server.sh").read() == b"unfinished launcher"
