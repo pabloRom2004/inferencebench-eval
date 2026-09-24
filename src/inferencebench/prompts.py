@@ -132,7 +132,7 @@ NUDGE_PROMPT = Prompt(
 
 TOKEN_BUDGET_REMINDER = Prompt(
     title="token_budget_reminder",
-    prompt="Token budget: {used:,.0f} / {limit:,.0f} input-plus-output tokens used; {remaining:,.0f} remaining. This counts cumulative usage across API calls, including cached input. Keep improving and measuring the server until the budget is exhausted.",
+    prompt="Token budget: {used:,.0f} / {limit:,.0f} input-plus-output tokens used; {remaining:,.0f} remaining.",
     role="subject",
     origin="Inspect port; requested by Pablo on 2026-09-09",
     origin_note="Rendered from Inspect's effective sample limit before the first turn and after each turn.",
