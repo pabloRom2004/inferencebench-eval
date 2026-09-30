@@ -121,7 +121,7 @@ Config: [default.yaml](src/inferencebench/run_configs/default.yaml) (recommended
 Config: [default.yaml](src/inferencebench/run_configs/default.yaml), with `solver.solver: inferencebench/default_agent` and the selected `harness`.
 
 - `harness`: native Inspect SWE factory; `claude_code` or `codex_cli`.
-- `harness_args`: native options. Verified Claude Code settings are `version: 2.1.267` with `permission_mode: bypassPermissions`, `retry_refusals: 0`, and `env: {BASH_MAX_TIMEOUT_MS: "36000000"}`; verified Codex settings are `version: 0.154.0` with `web_search: disabled`, because its native search runs on OpenAI's side and cannot follow the bridge.
+- `harness_args`: native options. Verified Claude Code settings are `version: 2.1.267` with `permission_mode: bypassPermissions`, `retry_refusals: 0`, and `env: {BASH_MAX_TIMEOUT_MS: "36000000"}`; with an OpenAI subject model, Claude Code also needs `-M strict_tools=false`, because its tool schemas have optional parameters that strict schemas reject; verified Codex settings are `version: 0.154.0` with `web_search: disabled`, because its native search runs on OpenAI's side and cannot follow the bridge.
 - `cli_poll_timeout`: seconds a remote-process poll may wait; `7200`. Native adapters otherwise leave this unset.
 - `nudge_prompt`, `token_budget_reminder`, `web_search_args`: same defaults as ReAct.
 
@@ -208,6 +208,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 
 ### [18] - 2026-09-30
 
+- CLI harnesses (Claude Code, Codex and the others) no longer crash when they reach `agent_seconds`; the deadline flag is recorded in the sample store.
 - Default judge model is GPT-6.1 Sol.
 - Default budget is 8 hours of wall-clock time (`agent_seconds: 28800`) with no token limit; the prompt points the agent at `./timer.sh` instead of token reminders when a deadline is set.
 - `split_evaluate` replaces `evaluate.py --quick` with speed-only and quality-only runs the agent sizes itself (default); `original.yaml` keeps upstream's `--quick`. It supersedes `quick_quality_subset`.

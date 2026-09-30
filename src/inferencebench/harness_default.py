@@ -190,7 +190,8 @@ def with_deadline(solve: Solver | Agent):
             # A transfer or tool cut off by the deadline can surface as another error type.
             if not deadline.expired():
                 raise
-            state.metadata["agent_deadline_reached"] = True
+            # CLI harnesses pass an AgentState, which has no metadata, so record the stop in the sample store.
+            store().set("agent_deadline_reached", True)
             return state
         finally:
             _DEADLINE.reset(token)

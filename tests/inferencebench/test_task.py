@@ -826,7 +826,7 @@ def test_token_budget_stopping(local_task, tmp_path, submit, nudge, expected_lim
     assert log.status == "success"
     sample = read_eval_log(log.location).samples[0]
     assert bool(sample.limit and sample.limit.type == "token") == expected_limit
-    assert "agent_deadline_reached" not in sample.metadata
+    assert "agent_deadline_reached" not in sample.store
     reminders = [
         m.text
         for m in sample.messages
@@ -1547,7 +1547,8 @@ async def test_deadline_absorbs_failures_after_expiry(monkeypatch):
 
     state = SimpleNamespace(metadata={})
     end = time.time() + 0.2
-    monkeypatch.setattr(reminders, "store", lambda: SimpleNamespace(get=lambda key: end))
+    saved = {}
+    monkeypatch.setattr(reminders, "store", lambda: SimpleNamespace(get=lambda key: end, set=saved.__setitem__))
 
     async def cut_off(state, generate):
         """Mimic asyncssh turning the deadline's cancellation into an empty RuntimeError."""
@@ -1557,7 +1558,7 @@ async def test_deadline_absorbs_failures_after_expiry(monkeypatch):
             raise RuntimeError("") from None
 
     assert await reminders.with_deadline(cut_off)(state, None) is state
-    assert state.metadata["agent_deadline_reached"] is True
+    assert saved["agent_deadline_reached"] is True
 
     end = time.time() + 10
 

@@ -302,13 +302,17 @@ def test_resume_for_scoring_keeps_deadline(monkeypatch):
 
 async def test_deadline_reschedule_moves_running_agent(monkeypatch):
     """Let a restored agent run past the setup deadline when the restore extends it, then stop at the new one."""
+    from inspect_ai.agent import AgentState
+
     from inferencebench import harness_default
 
     end = time.time() + 0.2
+    saved = {}
     monkeypatch.setattr(
-        harness_default, "store", lambda: SimpleNamespace(get=lambda key: end)
+        harness_default, "store", lambda: SimpleNamespace(get=lambda key: end, set=saved.__setitem__)
     )
-    state = SimpleNamespace(metadata={})
+    # CLI harnesses hand the wrapper an AgentState, which has no metadata.
+    state = AgentState(messages=[])
     finished = []
 
     async def restored(state, generate):
@@ -321,7 +325,7 @@ async def test_deadline_reschedule_moves_running_agent(monkeypatch):
     started = time.time()
     assert await harness_default.with_deadline(restored)(state, None) is state
     assert finished and 0.5 < time.time() - started < 2
-    assert state.metadata["agent_deadline_reached"]
+    assert saved["agent_deadline_reached"]
 
 
 @pytest.mark.parametrize("alive", [True, False])
