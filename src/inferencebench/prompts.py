@@ -111,7 +111,7 @@ TOKEN_BUDGET_DESCRIPTION = Prompt(
 
 TIMED_BUDGET_DESCRIPTION = Prompt(
     title="timed_budget_description",
-    prompt="You have {num_hours} hours of wall-clock optimization time, starting after environment preparation. The token limit also applies; stop when either budget ends. Use ./timer.sh to check the remaining time and leave the best working start_server.sh ready before the deadline.",
+    prompt="You have {num_hours} hours of wall-clock optimization time, starting after environment preparation. Use ./timer.sh to check the remaining time and leave the best working start_server.sh ready before the deadline.",
     role="subject",
     origin="Inspect port; render the configured agent_seconds deadline in the maintained prompt",
     inspect_parameter="agent_seconds",
@@ -136,7 +136,7 @@ CONTINUE_PROMPT = Prompt(
 
 NUDGE_PROMPT = Prompt(
     title="continue_until_token_budget",
-    prompt="Continue working on the inference server. Use tools to explore, implement, and measure improvements. A working deployment or a final answer does not end this attempt. Use the remaining token budget, and keep the best standalone start_server.sh ready for final evaluation.",
+    prompt="Continue working on the inference server. Use tools to explore, implement, and measure improvements. A working deployment or a final answer does not end this attempt. Use the remaining budget, and keep the best standalone start_server.sh ready for final evaluation.",
     role="subject",
     origin="Inspect port; requested by Pablo on 2026-09-09",
     origin_note="Unbounded early-answer continuation, following the ExploitBench default agent pattern.",

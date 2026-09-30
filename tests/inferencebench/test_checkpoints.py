@@ -133,6 +133,8 @@ def test_cli_checkpoint_preserves_progress_and_scoring(
         task,
         model=get_model("mockllm/subject", custom_outputs=output, memoize=False),
         model_roles={"integrity": judge_model()},
+        # A token limit makes Inspect record usage, which the restore must carry over.
+        token_limit=100000000,
         checkpoint=CheckpointConfig(
             trigger=TurnInterval(every=1),
             checkpoints_location=str(tmp_path / "checkpoints"),
@@ -234,6 +236,8 @@ def test_restore_extends_deadline_and_keeps_usage(
         task,
         model=get_model("mockllm/subject", custom_outputs=output, memoize=False),
         model_roles={"integrity": judge_model()},
+        # A token limit makes Inspect record usage, which the restore must carry over.
+        token_limit=100000000,
         checkpoint=CheckpointConfig(
             trigger=TurnInterval(every=1),
             checkpoints_location=str(tmp_path / "checkpoints"),

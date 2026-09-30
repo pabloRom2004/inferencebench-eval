@@ -153,12 +153,12 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `quick_quality_subset`: make the agent's `evaluate.py --quick` check 16 MMLU-Pro questions as upstream intends; `true` by default. Upstream (`original.yaml`, `false`) sets the question count with `setdefault`, which never applies because the harness already exports the full count, so `--quick` runs the whole quality set. Final scoring always uses the full set.
 - `retokenize_outputs`: count every output's tokens with the model tokenizer after timing ends, for the baseline, the agent's `evaluate.py`, and final scoring alike; `true` by default. Upstream (`original.yaml`, `false`) uses server-reported usage, which stock vLLM omits and the Transformers baseline reports as a word-level chunk count, so both sides fall back to roughly whitespace words.
 - `scenario_a_output_tokens`: cap Scenario A's forced output length for the agent's `evaluate.py`, the speed baseline, and final scoring. Scenario A scores median TTFT at concurrency 1, so decode tokens only cost time; `16` by default (a few tokens so the first streamed chunk always carries text), `null` in the original config, which keeps upstream's 819 to 1024.
-- `agent_seconds`: optimization wall-clock limit, starting after preparation; `36000` (10 hours) by default, `7200` in the original config. The maintained prompt reflects the deadline; `-T agent_seconds=null` removes it. Preparation and final scoring take additional time.
+- `agent_seconds`: optimization wall-clock limit, starting after preparation; `28800` (8 hours) by default, with no token limit, `7200` in the original config. The maintained prompt reflects the deadline; `-T agent_seconds=null` removes it. Preparation and final scoring take additional time.
 - RunPod's [provider configuration](src/inferencebench/assets/sandboxes/runpod.yaml) separately allows `7200` seconds for saving the filesystem before grading (`snapshot_timeout_seconds`) and `7200` seconds for initial startup or restoration (`startup_timeout_seconds`). These infrastructure allowances do not extend `agent_seconds`; customize them with `gpu_config`.
 - `quality_samples`, `quality_seed`: `500`, `248`.
 - `quality_reference_backend`: server measuring the MMLU-Pro reference; `vllm` (pinned 0.19.0) by default, which answers in minutes but scores a few questions higher on the same weights, tightening the gate to about 147 to 149 of 500; `transformers`, the original naive server, in `original.yaml` (about 57 minutes, 151/500, gate 144). Upstream's precompute runs the Transformers reference at concurrency 1 and other backends at `quality_concurrency`; the port does the same. Every sample measures its own reference during preparation, before the agent clock starts.
 - `quality_baseline_max_attempts`: `2` retries a failed reference request once on its own and requires a complete reference; `1` accepts upstream's registry exactly as its precompute wrote it.
-- `quality_tau`: required fraction of reference accuracy; `0.9` by default, which puts the gate about 15 of 500 questions below the reference, well outside the 3 to 5 questions that backend numerics move it; `0.95` in `original.yaml`.
+- `quality_tau`: required fraction of reference accuracy; `0.95` in both configs, upstream's value.
 - `checkpoint`: save the attempt so a crash resumes on a fresh GPU; `true` by default, `false` in `original.yaml`. See [Checkpoint recovery](#checkpoint-recovery).
 - `checkpoint_seconds`, `checkpoint_max_failures`: save at the first agent boundary after every `600` seconds, and error the attempt after more than `3` consecutive failed saves.
 
@@ -175,7 +175,7 @@ Evaluation (`eval_config`):
 
 - `limit`: selected samples before epoch repetition; `null` means all selected.
 - `epochs`: attempts per scenario/seed pair; `1`.
-- `token_limit`: cumulative input-plus-output tokens, including cached input; `100000000`, original `null`.
+- `token_limit`: cumulative input-plus-output tokens, including cached input; `null` in both configs, so `agent_seconds` bounds the default run.
 - `time_limit`: native attempt deadline; `null`. The original uses `agent_seconds` above.
 - `score_on_error`: `false` by default, so a crashed attempt resumes from its checkpoint on the next eval-set retry instead of being graded; an attempt that exhausts its retries stays an unscored error. `true` in `original.yaml`: a solver error still sends its partial submission through the normal restart, quality, speed, and integrity checks, and the original error remains in the log. Infrastructure failures in grading remain errors, with no invented score. Hawk retains the submission and transcript before the scoring restart as well as after it, so a failed filesystem snapshot does not discard the task directory.
 - `max_samples`: concurrent attempts; `1`.
@@ -205,6 +205,12 @@ The agent edits `start_server.sh` and tests with `evaluate.py`. Final scoring re
 Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailable integrity judgments remain unscored; infrastructure failures remain Inspect errors. Report incomplete runs with their completed, scored, and unscored attempt counts.
 
 ## Changelog
+
+### [18] - 2026-09-30
+
+- Default judge model is GPT-6.1 Sol.
+- Default budget is 8 hours of wall-clock time (`agent_seconds: 28800`) with no token limit; the prompt points the agent at `./timer.sh` instead of token reminders when a deadline is set.
+- Default quality gate returns to upstream's `quality_tau: 0.95`.
 
 ### [17] - 2026-09-24
 

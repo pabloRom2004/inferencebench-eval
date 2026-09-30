@@ -39,6 +39,7 @@ def render_prompt(template: str, options: dict[str, Any], scenario: str) -> str:
     values = {
         "budget_description": budget_description,
         "budget_name": "optimization budget" if timed else "token budget",
+        "budget_tracking": "Use ./timer.sh to track your remaining time." if timed else "Use the live token-budget reminders to track your remaining budget.",
         "model": options["base_model"],
         "scenario": record["benchmark"],
         "mission": record["mission"],

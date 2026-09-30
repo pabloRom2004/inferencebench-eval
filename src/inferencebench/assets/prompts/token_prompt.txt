@@ -19,7 +19,7 @@ Explore, implement, and verify improvements autonomously throughout your {budget
 - Use ./start_server.sh as the canonical and only entrypoint to set up and run your server; do not rely on any alternative launcher file or direct ad-hoc Python/module invocation for final operation.
 - Use ./test_server.sh if you want to launch ./start_server.sh under the same supervised scaffold the harness uses for final evaluation.
 - Ensure the server is fully functional and actively running, and verify end-to-end functionality by successfully running evaluate.py against it.
-- Use the live token-budget reminders to track your remaining budget. Keep a stable, optimized server ready while continuing to experiment.
+- {budget_tracking} Keep a stable, optimized server ready while continuing to experiment.
 
 ## 3. Action Space & Tooling
 

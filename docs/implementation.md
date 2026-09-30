@@ -2,7 +2,7 @@
 
 [InferenceBench](https://arxiv.org/abs/2607.20468) evaluates agents that deploy and optimize an inference server for Mistral-7B-Instruct-v0.3 on one H100 80GB. The original benchmark gives each agent two hours, root access, the Internet, cached model weights, and an OpenAI-compatible serving contract.
 
-This Inspect port vendors the [original repository](https://github.com/aisa-group/InferenceBench/tree/24cdf88f6a4e14ed85d665aa132cecccb3ee95ef) byte-for-byte under `src/inferencebench/upstream/`, installs it into every sandbox with the patches in `src/inferencebench/patches/`, and drives its own entrypoints: the sampler caches, baseline and reference precompute scripts, task `evaluate.py`, launch scaffold, timer, task prompt, quality parser, and integrity rubric. The default solver is Inspect ReAct with 100 million input-plus-output tokens per attempt and a 10-hour optimization deadline. A separate original configuration runs Claude Code 2.1.114 through Inspect SWE and resumes early exits until the time budget expires.
+This Inspect port vendors the [original repository](https://github.com/aisa-group/InferenceBench/tree/24cdf88f6a4e14ed85d665aa132cecccb3ee95ef) byte-for-byte under `src/inferencebench/upstream/`, installs it into every sandbox with the patches in `src/inferencebench/patches/`, and drives its own entrypoints: the sampler caches, baseline and reference precompute scripts, task `evaluate.py`, launch scaffold, timer, task prompt, quality parser, and integrity rubric. The default solver is Inspect ReAct with an 8-hour optimization deadline and no token limit. A separate original configuration runs Claude Code 2.1.114 through Inspect SWE and resumes early exits until the time budget expires.
 
 ## Usage
 
@@ -77,9 +77,9 @@ Both solvers can install vLLM, SGLang, TGI, or another engine; read and modify t
 
 ReAct exposes Inspect's bash and Python tools plus a `web_search` tool, and compacts at 75% of context. Search uses [DDGS](https://github.com/deedy5/ddgs) with DuckDuckGo, requires no search API key, and works with OpenRouter models including GLM. It returns titles, URLs, and snippets; agents can fetch full pages with their shell tools. Search runs on the host and its calls and results appear in the Inspect transcript. `solver.args.web_search_args` configures the backend, result count, and request timeout; remove `web_search` from `solver.args.tools` to disable it. Public search services may rate-limit requests; these return tool errors that the agent can recover from.
 
-By default, `submit: false` removes the submit tool, `nudge_prompt: true` resumes every early final answer without a nudge-count limit, and `token_budget_reminder: true` shows the effective token limit and remaining budget before the first turn and after subsequent turns. The budget counts cumulative input and output across API calls, including cached input. There is no optimization time limit, turn limit, or extra per-response output cap. Search uses no additional language-model calls.
+By default, `submit: false` removes the submit tool, `nudge_prompt: true` resumes every early final answer without a nudge-count limit, and `token_budget_reminder: true` shows the effective token limit and remaining budget before the first turn and after subsequent turns whenever a token limit is set. That budget counts cumulative input and output across API calls, including cached input. There is no turn limit or extra per-response output cap. Search uses no additional language-model calls.
 
-Token exhaustion is the default agent's only normal stopping condition. Set `submit: true` to permit explicit submission, or `nudge_prompt: false` to allow an ordinary final answer to finish. Infrastructure and provider errors remain errors; [Modal's 24-hour sandbox lifetime](https://modal.com/docs/guide/sandboxes) still applies. Native Inspect token limits are checked at generation boundaries, so the final call may cross the nominal limit. The original configuration retains Claude Code's own tools and context management. `original_agent` accepts compatible Inspect SWE factory names, including `codex_cli`, `opencode`, and `gemini_cli`; pass an appropriate CLI version explicitly when selecting another harness.
+The `agent_seconds` deadline is the default agent's only normal stopping condition, or token exhaustion when a token limit is set. Set `submit: true` to permit explicit submission, or `nudge_prompt: false` to allow an ordinary final answer to finish. Infrastructure and provider errors remain errors; [Modal's 24-hour sandbox lifetime](https://modal.com/docs/guide/sandboxes) still applies. Native Inspect token limits are checked at generation boundaries, so the final call may cross the nominal limit. The original configuration retains Claude Code's own tools and context management. `original_agent` accepts compatible Inspect SWE factory names, including `codex_cli`, `opencode`, and `gemini_cli`; pass an appropriate CLI version explicitly when selecting another harness.
 
 `cli_agent` shares continuation, token reminders, and host-side search with ReAct while retaining each native CLI session and compaction. Claude Code’s built-in WebSearch is replaced by that bridged search. All model requests, including auxiliary Claude Code roles, use Inspect’s configured model bridge.
 
@@ -144,14 +144,14 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `max_model_len` | 32768 | Original evaluator and baseline context limit |
 | `baseline_dtype` | `float16` | Precision of the Transformers speed baseline and the reference server; `bfloat16` for bf16-native models |
 | `context_length` | `null` | Optimizing model's context window; used by Inspect compaction and model bridges |
-| `agent_seconds` | `36000` | Optimization wall-clock limit (`null` removes it), reflected in the maintained prompt; starts after preparation and excludes final scoring. `original.yaml` uses 7200 seconds |
-| `eval_config.token_limit` | 100000000 | Total input-plus-output tokens per attempt; override with `--token-limit` |
+| `agent_seconds` | `28800` | Optimization wall-clock limit (`null` removes it), reflected in the maintained prompt; starts after preparation and excludes final scoring. `original.yaml` uses 7200 seconds |
+| `eval_config.token_limit` | `null` | Total input-plus-output tokens per attempt; set one with `--token-limit` |
 | `quality_samples` | 500 | MMLU-Pro quality-gate questions |
 | `quality_seed` | 248 | Fixed quality sample seed |
 | `quality_reference_backend` | `vllm` | Server measuring the MMLU-Pro reference: pinned vLLM 0.19.0 in float16, which answers in minutes but scores slightly higher; `original.yaml` uses the original `transformers` server |
 | `quality_concurrency` | 4 | Concurrent quality-gate requests, and the vLLM reference's concurrency; upstream measures the Transformers reference at 1 |
 | `quality_baseline_max_attempts` | 2 | Total attempts per reference question; failed questions retry individually. `1` accepts upstream's registry as its precompute wrote it |
-| `quality_tau` | 0.9 | Required fraction of the selected quality reference's accuracy; `original.yaml` keeps upstream's 0.95 |
+| `quality_tau` | 0.95 | Required fraction of the selected quality reference's accuracy, upstream's value |
 | `server_wait_seconds` | 900 | Final server readiness allowance |
 | `request_timeout_seconds` | 300 | Per-request timeout |
 | `system_prompt` | `token_budget` | Original task text adapted to token budgeting; `original.yaml` uses the verbatim prompt |

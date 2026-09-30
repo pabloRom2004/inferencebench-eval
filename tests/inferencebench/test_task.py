@@ -221,9 +221,11 @@ def test_config_dataset_and_provenance():
     ]
     assert task.dataset[0].metadata["quality_samples"] == 500
     assert task.config.attempt_timeout == config["generate_config"]["attempt_timeout"]
-    assert task.token_limit == 100000000
-    assert task.dataset[0].metadata["agent_seconds"] == 36000
-    assert "10 hours of wall-clock optimization time" in task.dataset[0].input
+    assert task.token_limit is None
+    assert task.dataset[0].metadata["agent_seconds"] == 28800
+    assert "8 hours of wall-clock optimization time" in task.dataset[0].input
+    assert "Use ./timer.sh to track your remaining time." in task.dataset[0].input
+    assert "token limit" not in task.dataset[0].input
     assert "Kernel Optimization" in task.dataset[0].input
     assert "{model}" not in task.dataset[0].input
     assert "24cdf88" in PROMPTS["original"].origin
@@ -252,7 +254,6 @@ def test_config_dataset_and_provenance():
         "scenario_a_output_tokens",
         "retokenize_outputs",
         "quick_quality_subset",
-        "quality_tau",
         "checkpoint",
     }
     assert config["task"]["args"]["checkpoint"] and not original["task"]["args"]["checkpoint"]
@@ -619,7 +620,7 @@ def test_independent_native_budget_defaults(
         **dict(args, agent_seconds=seconds, scenarios="A", seed_pairs=[[21, 1337]])
     )
     task.sandbox = None
-    assert task.token_limit == (100000000 if config_defaults == "default" else None)
+    assert task.token_limit is None
     [log] = inspect_eval(
         task,
         solver=generate(),
@@ -2006,7 +2007,7 @@ def test_final_evaluation_uses_upstream_command_and_retries(monkeypatch, tmp_pat
     assert command[1] == str(UPSTREAM / "src/eval/tasks/inference_scenario_a_input_heavy/evaluate.py")
     flags = dict(zip(command[2::2], command[3::2]))
     assert flags["--requests-file"] == str(tmp_path / "inference/baselines/speed/torch/inference_scenario_a_input_heavy/mistralai_Mistral-7B-Instruct-v0.3/requests.jsonl")
-    assert flags["--quality-tau"] == "0.9" and "--request-limit" not in flags and "--request-timeout-s" not in flags
+    assert flags["--quality-tau"] == "0.95" and "--request-limit" not in flags and "--request-timeout-s" not in flags
     assert env == {"INFERENCE_BENCH_DATASET_SEED": "1337", "INFERENCE_BENCH_ARRIVAL_SEED": "1337", "INFERENCE_BENCH_RETOKENIZE_OUTPUTS": "1", "INFERENCE_BENCH_OUTPUT_TOKEN_CAP": "16"} and timeout == 3600 and check is False
     attempts.clear()
     monkeypatch.setattr(runtime, "run_upstream", lambda command, log, **kwargs: attempts.append(command) and 1)

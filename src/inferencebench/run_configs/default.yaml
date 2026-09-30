@@ -14,8 +14,8 @@ task:
     baseline_dtype: float16
     # Optimizing agent's context window; null uses Inspect's model metadata.
     context_length: null
-    # Ten-hour wall-clock cap alongside the token limit.
-    agent_seconds: 36000
+    # Eight-hour wall-clock budget; there is no token limit.
+    agent_seconds: 28800
     system_prompt: token_budget
     # Leaderboard strict rules: no third-party pre-quantized checkpoints, no harness edits.
     strict_prompt: true
@@ -33,8 +33,7 @@ task:
     quality_seed: 248
     # A pinned vLLM server measures the MMLU-Pro reference in minutes; it scores a few questions above the original Transformers server, raising the gate slightly.
     quality_reference_backend: vllm
-    # Wider than upstream's 0.95: backend numerics alone move the reference by 3 to 5 of 500 questions.
-    quality_tau: 0.9
+    quality_tau: 0.95
     quality_concurrency: 4
     quality_baseline_max_attempts: 2
     server_wait_seconds: 900
@@ -105,8 +104,8 @@ eval_config:
   # Repeats each scenario–seed sample; 1 avoids additional runs.
   epochs: 1
   epochs_reducer: [inferencebench/complete_mean]
-  # Total input-plus-output tokens per sample, including cached input.
-  token_limit: 100000000
+  # No token limit; agent_seconds bounds the run.
+  token_limit: null
   time_limit: null
   # A crashed attempt resumes from its checkpoint on the next eval-set retry instead of being graded.
   score_on_error: false
