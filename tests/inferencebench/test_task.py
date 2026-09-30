@@ -251,6 +251,7 @@ def test_config_dataset_and_provenance():
         "seeded_arrivals",
         "scenario_a_output_tokens",
         "retokenize_outputs",
+        "quick_quality_subset",
         "quality_tau",
         "checkpoint",
     }
@@ -1579,7 +1580,7 @@ def test_vendored_upstream_matches_pinned_commit():
     lock = vendored.upstream_lock()
     assert vendored.git_tree_hash(vendored.UPSTREAM) == lock["tree"]
     assert len(lock["commit"]) == 40 and lock["source"].startswith("https://github.com/")
-    assert [patch.name for patch in vendored.PATCHES] == ["0001-repair-head-truncation-boundary.patch", "0002-seed-poisson-arrivals.patch", "0003-cap-speed-output-tokens.patch", "0004-retokenize-output-tokens.patch"]
+    assert [patch.name for patch in vendored.PATCHES] == ["0001-repair-head-truncation-boundary.patch", "0002-seed-poisson-arrivals.patch", "0003-cap-speed-output-tokens.patch", "0004-retokenize-output-tokens.patch", "0005-quick-quality-subset.patch"]
     assert vendored.scenario_directories() == {
         "A": "inference_scenario_a_input_heavy", "B": "inference_scenario_b_output_heavy",
         "C": "inference_scenario_c_high_load", "D": "inference_scenario_d_general",
@@ -1709,6 +1710,22 @@ def test_patch_retokenizes_outputs_after_timing(tmp_path, monkeypatch):
         runner._retokenize_outputs(results)
 
 
+def test_patch_quick_runs_its_quality_subset(tmp_path, monkeypatch):
+    """Shorten --quick's quality set only when the harness asks, even though the full count is already set."""
+    runner, _ = load_patched_runner(tmp_path, monkeypatch, True)
+    seen = {}
+    monkeypatch.setattr(runner, "run_speed_eval", lambda *args: {"model_id": "m"})
+    monkeypatch.setattr(runner, "run_quality_eval", lambda *args: seen.setdefault("n", runner.os.environ["INFERENCE_BENCH_QUALITY_MMLUPRO_N"]) and {"pass": True})
+    args = runner.build_parser().parse_args(["--quick"])
+
+    for override, expected in [("", "500"), ("1", "16")]:
+        seen.clear()
+        monkeypatch.setenv("INFERENCE_BENCH_QUALITY_MMLUPRO_N", "500")
+        monkeypatch.setenv("INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE", override)
+        runner.run_evaluation(tmp_path, args)
+        assert seen["n"] == expected
+
+
 def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path):
     """Install upstream's unchanged launch scaffold and evaluator stub, and export the agent environment for shells."""
     from inferencebench.assets.scripts import runtime
@@ -1745,6 +1762,8 @@ def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path
     assert "INFERENCE_BENCH_OUTPUT_TOKEN_CAP" not in runtime.environment({**options, "scenario_a_output_tokens": original["scenario_a_output_tokens"]})
     assert "export INFERENCE_BENCH_RETOKENIZE_OUTPUTS=1\n" in profile
     assert "INFERENCE_BENCH_RETOKENIZE_OUTPUTS" not in runtime.environment({**options, "retokenize_outputs": original["retokenize_outputs"]})
+    assert "export INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE=1\n" in profile
+    assert "INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE" not in runtime.environment({**options, "quick_quality_subset": original["quick_quality_subset"]})
 
 
 def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):

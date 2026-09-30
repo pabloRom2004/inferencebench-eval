@@ -69,6 +69,7 @@ def inference_bench(
     seeded_arrivals:         bool = DEFAULT_TASK_ARGS["seeded_arrivals"],
     scenario_a_output_tokens: int | None = DEFAULT_TASK_ARGS["scenario_a_output_tokens"],
     retokenize_outputs:      bool = DEFAULT_TASK_ARGS["retokenize_outputs"],
+    quick_quality_subset:    bool = DEFAULT_TASK_ARGS["quick_quality_subset"],
     scorer:                  dict[str, Any] = DEFAULT_TASK_ARGS["scorer"],
 ) -> Task:
     """Optimize the configured base model's inference for four workloads on one H100 using the original evaluator."""
@@ -102,6 +103,8 @@ def inference_bench(
         raise ValueError("seeded_arrivals must be a boolean")
     if type(retokenize_outputs) is not bool:
         raise ValueError("retokenize_outputs must be a boolean")
+    if type(quick_quality_subset) is not bool:
+        raise ValueError("quick_quality_subset must be a boolean")
     if type(checkpoint) is not bool:
         raise ValueError("checkpoint must be a boolean")
     if type(checkpoint_max_failures) is not int or checkpoint_max_failures < 0:

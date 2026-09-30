@@ -75,6 +75,9 @@ def environment(options):
     if num_hours(options) is not None:
         env["NUM_HOURS"] = num_hours(options)
     env.update(evaluator_env(options, options["dev_seed"]))
+    if options["quick_quality_subset"]:
+        # Only the agent's development evaluate.py uses --quick; final scoring always runs the full set.
+        env["INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE"] = "1"
     return env
 
 

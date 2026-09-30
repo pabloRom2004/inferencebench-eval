@@ -150,6 +150,7 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `strict_prompt`: insert the leaderboard's strict rules (no third-party pre-quantized checkpoints, no modifying the evaluation harness) after the base-model constraint; `true`. The paper's Table 2 used the plain prompt; the site's dagger-marked rows used a strict prompt whose text is unreleased, so the wording is the port's.
 - `automated_tuning`: append an explicit instruction to use an automated hyperparameter search tool or programmatic search loop instead of manually selecting trials; `false` in both configs. Enable with `-T automated_tuning=true`.
 - `seeded_arrivals`: seed scenario C's Poisson arrival times from the requests' LongBench seed (development seed for the agent's `evaluate.py`, held-out seed for the baseline and final scoring); `true` by default, `false` in the original config, which keeps upstream's unseeded draw.
+- `quick_quality_subset`: make the agent's `evaluate.py --quick` check 16 MMLU-Pro questions as upstream intends; `true` by default. Upstream (`original.yaml`, `false`) sets the question count with `setdefault`, which never applies because the harness already exports the full count, so `--quick` runs the whole quality set. Final scoring always uses the full set.
 - `retokenize_outputs`: count every output's tokens with the model tokenizer after timing ends, for the baseline, the agent's `evaluate.py`, and final scoring alike; `true` by default. Upstream (`original.yaml`, `false`) uses server-reported usage, which stock vLLM omits and the Transformers baseline reports as a word-level chunk count, so both sides fall back to roughly whitespace words.
 - `scenario_a_output_tokens`: cap Scenario A's forced output length for the agent's `evaluate.py`, the speed baseline, and final scoring. Scenario A scores median TTFT at concurrency 1, so decode tokens only cost time; `16` by default (a few tokens so the first streamed chunk always carries text), `null` in the original config, which keeps upstream's 819 to 1024.
 - `agent_seconds`: optimization wall-clock limit, starting after preparation; `36000` (10 hours) by default, `7200` in the original config. The maintained prompt reflects the deadline; `-T agent_seconds=null` removes it. Preparation and final scoring take additional time.
@@ -220,6 +221,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 - Default measures the MMLU-Pro reference with the pinned vLLM server; `original.yaml` keeps the Transformers server.
 - Final scoring always uses upstream's full request counts; the `request_limit` setting is removed.
 - Default quality gate widens to `quality_tau: 0.9`; `original.yaml` keeps 0.95.
+- `quick_quality_subset` makes `evaluate.py --quick` check 16 MMLU-Pro questions (default); `original.yaml` keeps upstream's full-set behaviour.
 - `retokenize_outputs` counts output tokens with the model tokenizer (default); `original.yaml` keeps upstream's usage-or-words count.
 - Remove the shared MMLU-Pro reference cache: each sample measures its own reference during preparation (minutes with vLLM).
 
