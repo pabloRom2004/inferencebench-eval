@@ -255,6 +255,7 @@ def test_config_dataset_and_provenance():
         "retokenize_outputs",
         "quick_quality_subset",
         "quick_full_concurrency",
+        "quality_tau",
         "checkpoint",
     }
     assert config["task"]["args"]["checkpoint"] and not original["task"]["args"]["checkpoint"]
@@ -2012,7 +2013,7 @@ def test_final_evaluation_uses_upstream_command_and_retries(monkeypatch, tmp_pat
     assert command[1] == str(UPSTREAM / "src/eval/tasks/inference_scenario_a_input_heavy/evaluate.py")
     flags = dict(zip(command[2::2], command[3::2]))
     assert flags["--requests-file"] == str(tmp_path / "inference/baselines/speed/torch/inference_scenario_a_input_heavy/mistralai_Mistral-7B-Instruct-v0.3/requests.jsonl")
-    assert flags["--quality-tau"] == "0.95" and "--request-limit" not in flags and "--request-timeout-s" not in flags
+    assert flags["--quality-tau"] == "0.9" and "--request-limit" not in flags and "--request-timeout-s" not in flags
     assert env == {"INFERENCE_BENCH_DATASET_SEED": "1337", "INFERENCE_BENCH_ARRIVAL_SEED": "1337", "INFERENCE_BENCH_RETOKENIZE_OUTPUTS": "1", "INFERENCE_BENCH_OUTPUT_TOKEN_CAP": "16"} and timeout == 3600 and check is False
     attempts.clear()
     monkeypatch.setattr(runtime, "run_upstream", lambda command, log, **kwargs: attempts.append(command) and 1)

@@ -159,7 +159,7 @@ Defaults apply to ReAct/CLI unless marked otherwise. Task settings live in `task
 - `quality_samples`, `quality_seed`: `500`, `248`.
 - `quality_reference_backend`: server measuring the MMLU-Pro reference; `vllm` (pinned 0.19.0) by default, which answers in minutes but scores a few questions higher on the same weights, tightening the gate to about 147 to 149 of 500; `transformers`, the original naive server, in `original.yaml` (about 57 minutes, 151/500, gate 144). Upstream's precompute runs the Transformers reference at concurrency 1 and other backends at `quality_concurrency`; the port does the same. Every sample measures its own reference during preparation, before the agent clock starts.
 - `quality_baseline_max_attempts`: `2` retries a failed reference request once on its own and requires a complete reference; `1` accepts upstream's registry exactly as its precompute wrote it.
-- `quality_tau`: required fraction of reference accuracy; `0.95` in both configs, upstream's value.
+- `quality_tau`: required fraction of reference accuracy; `0.9` by default, which puts the gate about 15 of 500 questions below the reference, well outside the 3 to 5 questions that backend numerics move it; `0.95` in `original.yaml`. The paper's Table 10 finds the same passing runs at every threshold from 0.60 to 0.95, so leaderboard numbers do not depend on the choice.
 - `checkpoint`: save the attempt so a crash resumes on a fresh GPU; `true` by default, `false` in `original.yaml`. See [Checkpoint recovery](#checkpoint-recovery).
 - `checkpoint_seconds`, `checkpoint_max_failures`: save at the first agent boundary after every `600` seconds, and error the attempt after more than `3` consecutive failed saves.
 
@@ -211,7 +211,6 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 
 - Default judge model is GPT-6.1 Sol.
 - Default budget is 8 hours of wall-clock time (`agent_seconds: 28800`) with no token limit; the prompt points the agent at `./timer.sh` instead of token reminders when a deadline is set.
-- Default quality gate returns to upstream's `quality_tau: 0.95`.
 - `quick_full_concurrency` lets Scenario C's `--quick` check load all 64 burst slots (default); `original.yaml` keeps upstream's 4 requests.
 
 ### [17] - 2026-09-24

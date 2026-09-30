@@ -151,7 +151,7 @@ before removing a failed agent's sandbox; it preserves the failure outcome.
 | `quality_reference_backend` | `vllm` | Server measuring the MMLU-Pro reference: pinned vLLM 0.19.0 in float16, which answers in minutes but scores slightly higher; `original.yaml` uses the original `transformers` server |
 | `quality_concurrency` | 4 | Concurrent quality-gate requests, and the vLLM reference's concurrency; upstream measures the Transformers reference at 1 |
 | `quality_baseline_max_attempts` | 2 | Total attempts per reference question; failed questions retry individually. `1` accepts upstream's registry as its precompute wrote it |
-| `quality_tau` | 0.95 | Required fraction of the selected quality reference's accuracy, upstream's value |
+| `quality_tau` | 0.9 | Required fraction of the selected quality reference's accuracy; `original.yaml` keeps upstream's 0.95 |
 | `server_wait_seconds` | 900 | Final server readiness allowance |
 | `request_timeout_seconds` | 300 | Per-request timeout |
 | `system_prompt` | `token_budget` | Original task text adapted to token budgeting; `original.yaml` uses the verbatim prompt |
