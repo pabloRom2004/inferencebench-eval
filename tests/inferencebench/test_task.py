@@ -226,6 +226,7 @@ def test_config_dataset_and_provenance():
     assert "8 hours of wall-clock optimization time" in task.dataset[0].input
     assert "Use ./timer.sh to track your remaining time." in task.dataset[0].input
     assert "token limit" not in task.dataset[0].input
+    assert "evaluate.py --quality-only --questions N" in task.dataset[0].input and "--quick" not in task.dataset[0].input
     assert "Kernel Optimization" in task.dataset[0].input
     assert "{model}" not in task.dataset[0].input
     assert "24cdf88" in PROMPTS["original"].origin
@@ -253,8 +254,7 @@ def test_config_dataset_and_provenance():
         "seeded_arrivals",
         "scenario_a_output_tokens",
         "retokenize_outputs",
-        "quick_quality_subset",
-        "quick_full_concurrency",
+        "split_evaluate",
         "quality_tau",
         "checkpoint",
     }
@@ -1583,7 +1583,7 @@ def test_vendored_upstream_matches_pinned_commit():
     lock = vendored.upstream_lock()
     assert vendored.git_tree_hash(vendored.UPSTREAM) == lock["tree"]
     assert len(lock["commit"]) == 40 and lock["source"].startswith("https://github.com/")
-    assert [patch.name for patch in vendored.PATCHES] == ["0001-repair-head-truncation-boundary.patch", "0002-seed-poisson-arrivals.patch", "0003-cap-speed-output-tokens.patch", "0004-retokenize-output-tokens.patch", "0005-quick-quality-subset.patch"]
+    assert [patch.name for patch in vendored.PATCHES] == ["0001-repair-head-truncation-boundary.patch", "0002-seed-poisson-arrivals.patch", "0003-cap-speed-output-tokens.patch", "0004-retokenize-output-tokens.patch", "0005-split-evaluate.patch"]
     assert vendored.scenario_directories() == {
         "A": "inference_scenario_a_input_heavy", "B": "inference_scenario_b_output_heavy",
         "C": "inference_scenario_c_high_load", "D": "inference_scenario_d_general",
@@ -1713,20 +1713,38 @@ def test_patch_retokenizes_outputs_after_timing(tmp_path, monkeypatch):
         runner._retokenize_outputs(results)
 
 
-def test_patch_quick_runs_its_quality_subset(tmp_path, monkeypatch):
-    """Shorten --quick's quality set only when the harness asks, even though the full count is already set."""
+def test_patch_split_evaluate_sizes_each_part(tmp_path, monkeypatch):
+    """Replace --quick with speed-only and quality-only runs whose sizes the agent picks, only when the harness asks."""
     runner, _ = load_patched_runner(tmp_path, monkeypatch, True)
-    seen = {}
-    monkeypatch.setattr(runner, "run_speed_eval", lambda *args: {"model_id": "m"})
-    monkeypatch.setattr(runner, "run_quality_eval", lambda *args: seen.setdefault("n", runner.os.environ["INFERENCE_BENCH_QUALITY_MMLUPRO_N"]) and {"pass": True})
-    args = runner.build_parser().parse_args(["--quick"])
+    monkeypatch.delenv("INFERENCE_BENCH_SPLIT_EVALUATE", raising=False)
+    assert runner.build_parser().parse_args(["--quick"]).quick
+    monkeypatch.setenv("INFERENCE_BENCH_SPLIT_EVALUATE", "1")
+    with pytest.raises(SystemExit):
+        runner.build_parser().parse_args(["--quick"])
 
-    for override, expected in [("", "500"), ("1", "16")]:
-        seen.clear()
-        monkeypatch.setenv("INFERENCE_BENCH_QUALITY_MMLUPRO_N", "500")
-        monkeypatch.setenv("INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE", override)
-        runner.run_evaluation(tmp_path, args)
-        assert seen["n"] == expected
+    calls = []
+    monkeypatch.setattr(runner, "run_speed_eval", lambda *args: calls.append("speed") or {"model_id": "m"})
+    monkeypatch.setattr(runner, "run_quality_eval", lambda *args: calls.append(("quality", runner.os.environ["INFERENCE_BENCH_QUALITY_MMLUPRO_N"])) or {"pass": True})
+    monkeypatch.setattr(runner, "load_scenario_config", lambda task_dir: {"scenario_id": "C"})
+    monkeypatch.setattr(runner, "_wait_for_server", lambda *args: None)
+    monkeypatch.setattr(runner, "_detect_model_id", lambda *args: "m")
+    monkeypatch.setenv("INFERENCE_BENCH_QUALITY_MMLUPRO_N", "500")
+    runner.run_evaluation(tmp_path, runner.build_parser().parse_args(["--speed-only", "--request-limit", "64"]))
+    assert calls == ["speed"]
+    calls.clear()
+    metrics = runner.run_evaluation(tmp_path, runner.build_parser().parse_args(["--quality-only", "--questions", "16"]))
+    assert calls == [("quality", "16")] and metrics["profiles"] == {}
+
+    # A partial check is compared with the reference's accuracy on the same questions, not its full-set accuracy.
+    log = tmp_path / "reference.jsonl"
+    rows = [{"sample_id": f"q{i}", "gold_answer": "A", "parsed_answer": "A" if i < 2 else "B"} for i in range(4)]
+    log.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    baseline = {"accuracy": 0.5, "ref": {"n": 4, "baseline_log_file": str(log)}}
+    runner._same_question_reference(baseline, ["q0", "q1"])
+    assert baseline["accuracy"] == 1.0 and "same 2 questions" in baseline["ref"]["note"]
+    full = {"accuracy": 0.5, "ref": {"n": 4, "baseline_log_file": str(log)}}
+    runner._same_question_reference(full, ["q0", "q1", "q2", "q3"])
+    assert full["accuracy"] == 0.5
 
 
 def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path):
@@ -1765,12 +1783,8 @@ def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path
     assert "INFERENCE_BENCH_OUTPUT_TOKEN_CAP" not in runtime.environment({**options, "scenario_a_output_tokens": original["scenario_a_output_tokens"]})
     assert "export INFERENCE_BENCH_RETOKENIZE_OUTPUTS=1\n" in profile
     assert "INFERENCE_BENCH_RETOKENIZE_OUTPUTS" not in runtime.environment({**options, "retokenize_outputs": original["retokenize_outputs"]})
-    assert "export INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE=1\n" in profile
-    assert "INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE" not in runtime.environment({**options, "quick_quality_subset": original["quick_quality_subset"]})
-    # Only Scenario C's quick check is widened, and only in the default configuration.
-    assert runtime.environment({**options, "scenario": "C"})["INFERENCE_BENCH_QUICK_REQUEST_LIMIT"] == "64"
-    assert "INFERENCE_BENCH_QUICK_REQUEST_LIMIT" not in profile
-    assert "INFERENCE_BENCH_QUICK_REQUEST_LIMIT" not in runtime.environment({**options, "scenario": "C", "quick_full_concurrency": original["quick_full_concurrency"]})
+    assert "export INFERENCE_BENCH_SPLIT_EVALUATE=1\n" in profile
+    assert "INFERENCE_BENCH_SPLIT_EVALUATE" not in runtime.environment({**options, "split_evaluate": original["split_evaluate"]})
 
 
 def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):

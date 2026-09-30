@@ -1,0 +1,108 @@
+diff --git a/src/eval/inference/runner.py b/src/eval/inference/runner.py
+index 003e693..3544ce4 100644
+--- a/src/eval/inference/runner.py
++++ b/src/eval/inference/runner.py
+@@ -1276,6 +1276,8 @@ def run_quality_eval(
+         results, _, _ = asyncio.run(
+             _run_profile(profile, requests_list, server_url, model_id, request_timeout_s, log_path)
+         )
++        if _split_evaluate():
++            _same_question_reference(baseline[spec.name], [r.get("sample_id") for r in results if r.get("gold_answer") is not None])
+         run_results[spec.name] = {
+             "accuracy": _compute_accuracy(results),
+             "count": len([r for r in results if r.get("gold_answer") is not None]),
+@@ -1354,9 +1356,22 @@ def run_evaluation(task_dir: Path, args: argparse.Namespace) -> Dict[str, Any]:
+                 quick_quality_n = 16
+             os.environ.setdefault("INFERENCE_BENCH_QUALITY_MMLUPRO_N", str(quick_quality_n))
+ 
+-        metrics = run_speed_eval(task_dir, args, artifact_dir)
++        if getattr(args, "questions", None) is not None:
++            os.environ["INFERENCE_BENCH_QUALITY_MMLUPRO_N"] = str(max(1, int(args.questions)))
+ 
+-        skip_quality = os.environ.get("INFERENCE_BENCH_SKIP_QUALITY", "").lower() in {"1", "true", "yes"}
++        if getattr(args, "quality_only", False):
++            config = load_scenario_config(task_dir)
++            _wait_for_server(args.server_url, args.server_wait_s)
++            metrics = {
++                "scenario": config.get("scenario_id"),
++                "name": config.get("name"),
++                "model_id": _detect_model_id(args.server_url, args.model),
++                "profiles": {},
++            }
++        else:
++            metrics = run_speed_eval(task_dir, args, artifact_dir)
++
++        skip_quality = os.environ.get("INFERENCE_BENCH_SKIP_QUALITY", "").lower() in {"1", "true", "yes"} or getattr(args, "speed_only", False)
+         if not skip_quality:
+             quality = run_quality_eval(
+                 args.server_url,
+@@ -1400,6 +1415,34 @@ def run_evaluation(task_dir: Path, args: argparse.Namespace) -> Dict[str, Any]:
+         raise
+ 
+ 
++def _split_evaluate() -> bool:
++    return os.environ.get("INFERENCE_BENCH_SPLIT_EVALUATE", "").strip() == "1"
++
++
++def _same_question_reference(baseline: Dict[str, Any], sample_ids: List[Any]) -> None:
++    """Score the reference on the questions just evaluated when fewer than its full set were asked."""
++    ref = baseline.get("ref") or {}
++    log_file = ref.get("baseline_log_file")
++    if not log_file or int(ref.get("n", 0) or 0) <= len(sample_ids):
++        return
++    path = Path(log_file)
++    if not path.is_absolute():
++        path = quality_gate._repo_root() / path
++    if not path.is_file():
++        return
++    rows = {}
++    with path.open("r", encoding="utf-8") as handle:
++        for line in handle:
++            if line.strip():
++                row = json.loads(line)
++                rows[row.get("sample_id")] = row
++    picked = [rows[sample_id] for sample_id in sample_ids if sample_id in rows]
++    accuracy = _compute_accuracy(picked) if len(picked) == len(sample_ids) else None
++    if accuracy:
++        baseline["accuracy"] = accuracy
++        baseline["ref"] = {**ref, "note": f"reference accuracy on the same {len(picked)} questions"}
++
++
+ def build_parser() -> argparse.ArgumentParser:
+     def _env_float(name: str, default: float) -> float:
+         raw = os.environ.get(name, "").strip()
+@@ -1440,17 +1483,23 @@ def build_parser() -> argparse.ArgumentParser:
+     )
+     parser.add_argument("--json-output-file", type=str, default=None)
+     parser.add_argument("--request-limit", type=int, default=None)
+-    parser.add_argument(
+-        "--quick",
+-        action="store_true",
+-        help="Quick smoke-test mode: smaller speed request set and smaller quality subset.",
+-    )
+-    parser.add_argument(
+-        "--quick-request-limit",
+-        type=int,
+-        default=int(os.environ.get("INFERENCE_BENCH_QUICK_REQUEST_LIMIT", "4")),
+-        help="Max requests used when --quick is set.",
+-    )
++    if _split_evaluate():
++        # Development runs size each part themselves instead of --quick's fixed request and question counts.
++        parser.add_argument("--questions", type=int, default=None, help="MMLU-Pro questions to check (default: the full set); compared with the reference's accuracy on the same questions.")
++        parser.add_argument("--speed-only", action="store_true", help="Run the speed requests and skip the MMLU-Pro check.")
++        parser.add_argument("--quality-only", action="store_true", help="Run the MMLU-Pro check and skip the speed requests.")
++    else:
++        parser.add_argument(
++            "--quick",
++            action="store_true",
++            help="Quick smoke-test mode: smaller speed request set and smaller quality subset.",
++        )
++        parser.add_argument(
++            "--quick-request-limit",
++            type=int,
++            default=int(os.environ.get("INFERENCE_BENCH_QUICK_REQUEST_LIMIT", "4")),
++            help="Max requests used when --quick is set.",
++        )
+     parser.add_argument("--quality-tau", type=float, default=float(os.environ.get("INFERENCE_BENCH_QUALITY_TAU", "0.95")))
+     parser.add_argument(
+         "--mock",

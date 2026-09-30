@@ -39,6 +39,11 @@ def render_prompt(template: str, options: dict[str, Any], scenario: str) -> str:
     values = {
         "budget_description": budget_description,
         "budget_name": "optimization budget" if timed else "token budget",
+        "evaluate_usage": (
+            "During development, size each check yourself: evaluate.py --speed-only --request-limit N --json-output-file {metrics_path} sends N requests per load profile at the scenario's concurrency, and evaluate.py --quality-only --questions N --json-output-file {metrics_path} checks N MMLU-Pro questions against the reference's accuracy on the same questions. Run evaluate.py --json-output-file {metrics_path} without these flags, as final scoring does, for final confirmation/comparison."
+            if options["split_evaluate"] else
+            "During development, run fast smoke tests first with evaluate.py --quick --json-output-file {metrics_path}; use full evaluation runs for final confirmation/comparison."
+        ),
         "budget_tracking": "Use ./timer.sh to track your remaining time." if timed else "Use the live token-budget reminders to track your remaining budget.",
         "model": options["base_model"],
         "scenario": record["benchmark"],

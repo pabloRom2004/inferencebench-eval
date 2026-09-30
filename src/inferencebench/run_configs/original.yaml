@@ -27,9 +27,8 @@ task:
     scenario_a_output_tokens: null
     # Upstream uses server-reported usage, else whitespace words.
     retokenize_outputs: false
-    # Upstream's --quick runs the full quality set because the harness already sets the count.
-    quick_quality_subset: false
-    quick_full_concurrency: false
+    # Upstream's --quick: 4 requests per profile, and the full quality set because the harness already sets the count.
+    split_evaluate: false
     quality_samples: 500
     quality_seed: 248
     quality_reference_backend: transformers

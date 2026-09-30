@@ -10,8 +10,10 @@ which upstream draws unseeded; and an optional cap on forced speed output
 tokens, which `default.yaml` sets to 16 for scenario A only; and optional
 recounting of output tokens with the model tokenizer, since upstream counts
 whitespace words for vLLM and streamed chunks for its Transformers baseline;
-and an optional fix so `evaluate.py --quick` checks 16 MMLU-Pro questions,
-since upstream's `setdefault` never shortens the count the harness already sets;
+and an optional split of the agent's `evaluate.py` into speed-only and
+quality-only runs sized by the agent, replacing `--quick`, whose 4 requests never
+load scenario C and whose 16-question subset never applies because upstream's
+`setdefault` cannot shorten the count the harness already sets;
 `original.yaml` enables none of these), and runs upstream's own commands for every measured
 stage. The subject prompt, judge rubric, launcher template, evaluator stub, and
 scenario definitions are read from that copy rather than re-typed.

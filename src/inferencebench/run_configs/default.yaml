@@ -27,10 +27,8 @@ task:
     scenario_a_output_tokens: 16
     # Count output tokens with the model tokenizer on both baseline and submission.
     retokenize_outputs: true
-    # evaluate.py --quick checks 16 MMLU-Pro questions as upstream intends, instead of the full set.
-    quick_quality_subset: true
-    # evaluate.py --quick sends 64 requests per Scenario C profile instead of 4, so the burst reaches its 64 concurrent users.
-    quick_full_concurrency: true
+    # The agent's evaluate.py replaces --quick with --speed-only, --quality-only and --questions, sized by the agent.
+    split_evaluate: true
     quality_samples: 500
     quality_seed: 248
     # A pinned vLLM server measures the MMLU-Pro reference in minutes; it scores a few questions above the original Transformers server, raising the gate slightly.

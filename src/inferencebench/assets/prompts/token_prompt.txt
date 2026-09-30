@@ -14,7 +14,7 @@ You are tasked with deploying and optimizing an OpenAI-compatible inference serv
 Explore, implement, and verify improvements autonomously throughout your {budget_name}.
 
 - Use evaluate.py --json-output-file {metrics_path} as your primary feedback mechanism. Your goal is to continuously improve the scores reported by this script until the {budget_name} is exhausted.
-- During development, run fast smoke tests first with evaluate.py --quick --json-output-file {metrics_path}; use full evaluation runs for final confirmation/comparison.
+- {evaluate_usage}
 - You are expected to make changes, measure their impact, and iterate. Do not settle for a default configuration if optimization is possible.
 - Use ./start_server.sh as the canonical and only entrypoint to set up and run your server; do not rely on any alternative launcher file or direct ad-hoc Python/module invocation for final operation.
 - Use ./test_server.sh if you want to launch ./start_server.sh under the same supervised scaffold the harness uses for final evaluation.
