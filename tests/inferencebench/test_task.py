@@ -254,6 +254,7 @@ def test_config_dataset_and_provenance():
         "scenario_a_output_tokens",
         "retokenize_outputs",
         "quick_quality_subset",
+        "quick_full_concurrency",
         "checkpoint",
     }
     assert config["task"]["args"]["checkpoint"] and not original["task"]["args"]["checkpoint"]
@@ -1765,6 +1766,10 @@ def test_workspace_installs_upstream_files_and_environment(monkeypatch, tmp_path
     assert "INFERENCE_BENCH_RETOKENIZE_OUTPUTS" not in runtime.environment({**options, "retokenize_outputs": original["retokenize_outputs"]})
     assert "export INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE=1\n" in profile
     assert "INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE" not in runtime.environment({**options, "quick_quality_subset": original["quick_quality_subset"]})
+    # Only Scenario C's quick check is widened, and only in the default configuration.
+    assert runtime.environment({**options, "scenario": "C"})["INFERENCE_BENCH_QUICK_REQUEST_LIMIT"] == "64"
+    assert "INFERENCE_BENCH_QUICK_REQUEST_LIMIT" not in profile
+    assert "INFERENCE_BENCH_QUICK_REQUEST_LIMIT" not in runtime.environment({**options, "scenario": "C", "quick_full_concurrency": original["quick_full_concurrency"]})
 
 
 def test_speed_baseline_runs_upstream_precompute(monkeypatch, tmp_path):

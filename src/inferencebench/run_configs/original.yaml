@@ -29,6 +29,7 @@ task:
     retokenize_outputs: false
     # Upstream's --quick runs the full quality set because the harness already sets the count.
     quick_quality_subset: false
+    quick_full_concurrency: false
     quality_samples: 500
     quality_seed: 248
     quality_reference_backend: transformers

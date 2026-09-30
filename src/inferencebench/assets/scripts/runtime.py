@@ -78,6 +78,9 @@ def environment(options):
     if options["quick_quality_subset"]:
         # Only the agent's development evaluate.py uses --quick; final scoring always runs the full set.
         env["INFERENCE_BENCH_QUICK_QUALITY_OVERRIDE"] = "1"
+    if options["quick_full_concurrency"] and options["scenario"] == "C":
+        # Upstream's quick default of 4 requests never loads the burst profile's 64 concurrent slots.
+        env["INFERENCE_BENCH_QUICK_REQUEST_LIMIT"] = "64"
     return env
 
 
