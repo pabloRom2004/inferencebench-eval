@@ -89,7 +89,7 @@ generate_config:
 
 model_roles:
   integrity:
-    model: openrouter/openai/gpt-6-astra
+    model: openrouter/openai/gpt-6.1-sol
     args:
       # Claude Code's bridged tool schemas have optional parameters.
       strict_tools: false
