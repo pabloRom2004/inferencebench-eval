@@ -1,16 +1,16 @@
 {
  "schema_version": 1,
  "phase": "smoke",
- "updated_at": "2026-10-01T23:07:54Z",
+ "updated_at": "2026-10-01T23:17:54Z",
  "refresh_seconds": 600,
  "budget_usd": 2500,
  "spend": {
   "openrouter_usd": 3.2,
-  "runpod_usd": 6.92,
-  "total_usd": 10.13,
+  "runpod_usd": 7.47,
+  "total_usd": 10.68,
   "since": "2026-10-01T18:14:07Z",
-  "runpod_rate_per_hour": 3.523,
-  "checked_at": "2026-10-01T23:07:57Z"
+  "runpod_rate_per_hour": 0.005,
+  "checked_at": "2026-10-01T23:18:00Z"
  },
  "hawk_ok": true,
  "baselines": {
@@ -27,10 +27,10 @@
    "eval_set_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-smoke-codex2-b2da29c-4irkzgeoegqzbj5u",
    "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-smoke-codex2-b2da29c-4irkzgeoegqzbj5u#/samples/2026-10-01T23-05-44-00-00_inference-bench_84dBp7WRHj6DXPTgcR2Vts.eval/sample/A-21-1337/1/",
    "attempt": 3,
-   "status": "restoring",
-   "hawk_status": "running",
+   "status": "errored",
+   "hawk_status": "deleted",
    "trace_note": null,
-   "error": "ValueError",
+   "error": "CancelledError",
    "agent_seconds": 1200,
    "agent_seconds_used": 1124,
    "deadline": null,
@@ -39,33 +39,12 @@
    "restores": 1,
    "model_calls": 86,
    "last_model_call_at": "2026-10-01T22:52:02Z",
-   "tokens": {
-    "input": 243968,
-    "cache_read": 5253922,
-    "output": 29658
-   },
-   "tokens_as_of": "2026-10-01T22:52:06Z",
-   "tokens_live": false,
-   "cost_usd": 1.96,
+   "tokens": null,
+   "tokens_as_of": null,
+   "tokens_live": true,
+   "cost_usd": null,
    "grader_cost_usd": null,
-   "speedup_history": [
-    [
-     0.095,
-     1.293
-    ],
-    [
-     0.221,
-     1.739
-    ],
-    [
-     0.291,
-     1.824
-    ],
-    [
-     0.332,
-     1.824
-    ]
-   ],
+   "speedup_history": [],
    "speedup_note": null,
    "final": null
   },
