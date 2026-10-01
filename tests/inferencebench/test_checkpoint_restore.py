@@ -295,6 +295,8 @@ def test_container_death_resumes_from_checkpoint(pods, tmp_path, harness):
             memoize=False,
         ),
         model_roles={"integrity": judge_model()},
+        # A token limit makes Inspect record usage, which the restore must carry over.
+        token_limit=100000000,
         log_dir=str(checkpoints),
         retry_attempts=2,
         retry_wait=1,
