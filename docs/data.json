@@ -1,7 +1,7 @@
 {
  "schema_version": 1,
  "phase": "smoke",
- "updated_at": "2026-10-01T23:07:23Z",
+ "updated_at": "2026-10-01T23:07:54Z",
  "refresh_seconds": 600,
  "budget_usd": 2500,
  "spend": {
@@ -10,7 +10,7 @@
   "total_usd": 10.13,
   "since": "2026-10-01T18:14:07Z",
   "runpod_rate_per_hour": 3.523,
-  "checked_at": "2026-10-01T23:07:26Z"
+  "checked_at": "2026-10-01T23:07:57Z"
  },
  "hawk_ok": true,
  "baselines": {
