@@ -1,7 +1,7 @@
 {
  "schema_version": 1,
  "phase": "smoke",
- "updated_at": "2026-10-01T23:17:54Z",
+ "updated_at": "2026-10-01T23:18:21Z",
  "refresh_seconds": 600,
  "budget_usd": 2500,
  "spend": {
@@ -10,7 +10,7 @@
   "total_usd": 10.68,
   "since": "2026-10-01T18:14:07Z",
   "runpod_rate_per_hour": 0.005,
-  "checked_at": "2026-10-01T23:18:00Z"
+  "checked_at": "2026-10-01T23:18:24Z"
  },
  "hawk_ok": true,
  "baselines": {
@@ -30,21 +30,42 @@
    "status": "errored",
    "hawk_status": "deleted",
    "trace_note": null,
-   "error": "CancelledError",
+   "error": "ValueError",
    "agent_seconds": 1200,
-   "agent_seconds_used": 1124,
+   "agent_seconds_used": 1200,
    "deadline": null,
    "checkpoints": 3,
    "last_checkpoint_at": "2026-10-01T22:51:07Z",
    "restores": 1,
    "model_calls": 86,
    "last_model_call_at": "2026-10-01T22:52:02Z",
-   "tokens": null,
-   "tokens_as_of": null,
-   "tokens_live": true,
-   "cost_usd": null,
+   "tokens": {
+    "input": 243968,
+    "cache_read": 5253922,
+    "output": 29658
+   },
+   "tokens_as_of": "2026-10-01T22:52:06Z",
+   "tokens_live": false,
+   "cost_usd": 1.96,
    "grader_cost_usd": null,
-   "speedup_history": [],
+   "speedup_history": [
+    [
+     0.095,
+     1.293
+    ],
+    [
+     0.221,
+     1.739
+    ],
+    [
+     0.291,
+     1.824
+    ],
+    [
+     0.332,
+     1.824
+    ]
+   ],
    "speedup_note": null,
    "final": null
   },
