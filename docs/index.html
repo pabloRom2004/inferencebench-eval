@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Live progress of the InferenceBench 16-hour campaign: three models, four scenarios.">
+  <title>InferenceBench live campaign</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="live.css?v=1">
+  <script src="live.js?v=1" type="module"></script>
+</head>
+<body>
+<main class="wrap">
+  <h1>InferenceBench, 16 hours per run</h1>
+  <p class="standfirst">Three models each get 16 hours on one H100 to speed up Mistral-7B serving in four scenarios.</p>
+  <p id="updated" class="progress">Loading…</p>
+  <p id="phase" class="banner" hidden></p>
+
+  <details class="whatis">
+    <summary><span class="arrow">▸</span> what is this?</summary>
+    <div>
+      <p>Twelve Hawk eval sets with one sample each. Claude Opus 5.5 runs through Claude Code, GPT-6 Sol through Codex and GLM 5.3 Flash through OpenCode, all on OpenRouter at maximum reasoning effort. Scenario A scores time to first token on long prompts, B time per output token, C request throughput under load, and D the geometric mean of all three. Each run has a 16-hour optimisation clock on a RunPod H100, saves a checkpoint every 10 minutes, and restarts from its last checkpoint if the pod fails.</p>
+      <p>The final speedup restarts the submitted server, measures held-out requests against a naive PyTorch baseline, and applies the MMLU-Pro quality gate and an integrity review. The charts plot the best <code>evaluate.py</code> result each agent has printed so far, divided by the same baseline. Those runs use the agent's development requests and skip the quality gate, so they preview the score; they do not predict it. The dashed line marks the 2-hour budget of the published InferenceBench results.</p>
+      <p>Status, attempt, agent clock, checkpoints and restores come from Hawk's runner trace. Tokens, cost and speedup history come from attempt logs, which Hawk writes when an attempt ends, so a running attempt shows what its previous attempt recorded. The Hawk viewer can show the previous attempt until a restored run writes its log, so log links may lag while a retry runs.</p>
+      <p>Spend is the OpenRouter work key's usage since the campaign started (any other use of that key counts too) plus RunPod balance drops. Costs per run use each model's OpenRouter list price at the serving provider.</p>
+    </div>
+  </details>
+
+  <hr class="rule">
+
+  <section id="totals" class="totals" aria-label="Campaign totals"></section>
+
+  <h2>Best speedup so far</h2>
+  <div id="legend" class="legend" aria-label="Model colours"></div>
+  <div id="charts" class="charts"></div>
+
+  <h2>Runs</h2>
+  <div id="runs"></div>
+
+  <p id="notes" class="progress"></p>
+  <p class="progress"><a href="https://github.com/pabloRom2004/inferencebench-eval" target="_blank" rel="noopener">Source repository</a> · <a href="data.json">data.json</a></p>
+</main>
+</body>
+</html>
