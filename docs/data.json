@@ -1,7 +1,7 @@
 {
  "schema_version": 1,
  "phase": "smoke",
- "updated_at": "2026-10-01T23:18:21Z",
+ "updated_at": "2026-10-01T23:42:24Z",
  "refresh_seconds": 600,
  "budget_usd": 2500,
  "spend": {
@@ -10,9 +10,12 @@
   "total_usd": 10.68,
   "since": "2026-10-01T18:14:07Z",
   "runpod_rate_per_hour": 0.005,
-  "checked_at": "2026-10-01T23:18:24Z"
+  "runpod_balance": 124.9,
+  "runpod_balance_change": -7.47,
+  "runpod_balance_change_since": "2026-10-01T18:14:07Z",
+  "checked_at": "2026-10-01T23:42:30Z"
  },
- "hawk_ok": true,
+ "errors": [],
  "baselines": {
   "D": "measured by a local run on 24 September with the same seed pair and evaluator settings",
   "A": "measured by ib-smoke-opencode-b2da29c-z5rzakmq2wwc8vdg"
