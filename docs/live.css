@@ -169,6 +169,9 @@ code { font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
 }
 
 .meter.is-warning > span { background: #b8860b; }
+
+.balance.is-falling { color: #865000; }
+.balance.is-low { color: #aa2929; font-weight: 600; }
 .meter.is-over > span { background: #aa2929; }
 
 /* Charts */

@@ -67,6 +67,20 @@ function agentUsed(run) {
   return run.agent_seconds_used || 0;
 }
 
+function balanceLine(spend) {
+  // Auto top-up is on, so a falling balance is the signal to watch, with hours left at the current rate.
+  if (spend.runpod_balance === undefined) return "";
+  const rate = spend.runpod_rate_per_hour || 0;
+  const hoursLeft = rate > 0.1 ? spend.runpod_balance / rate : null;
+  const change = spend.runpod_balance_change;
+  const falling = change !== null && change < 0;
+  const state = hoursLeft !== null && hoursLeft < 6 ? "is-low" : falling ? "is-falling" : "";
+  return '<div class="stat-detail balance ' + state + '">RunPod balance ' + money(spend.runpod_balance) + ' (auto top-up on)' +
+    (change === null ? "" : falling ? " · down " + money(-change) + " since " + utc(spend.runpod_balance_change_since)
+      : change > 0 ? " · topped up since " + utc(spend.runpod_balance_change_since) : " · steady") +
+    (hoursLeft !== null ? " · about " + clock(hoursLeft * 3600) + " left at " + money(rate) + "/h" : "") + '</div>';
+}
+
 function renderTotals(data) {
   const spend = data.spend;
   const counts = {};
@@ -83,7 +97,9 @@ function renderTotals(data) {
         Math.round(share * 100) + '% of the cap"><span style="width:' + Math.min(100, share * 100).toFixed(2) + '%"></span></div>' +
       '<div class="stat-detail">OpenRouter ' + money(spend.openrouter_usd) + ' · RunPod ' + money(spend.runpod_usd) +
         ' (now ' + money(spend.runpod_rate_per_hour) + '/h) · since ' + utc(spend.since) +
-        (data.phase === "smoke" ? " (smoke preflight)" : " (campaign start)") + '</div>'
+        (data.phase === "smoke" ? " (smoke preflight)" : " (campaign start)") +
+        (Date.now() - Date.parse(spend.checked_at) > 20 * 60000 ? " · billing as of " + utc(spend.checked_at) : "") + '</div>' +
+      balanceLine(spend)
     );
   }
   $("#totals").innerHTML = (
@@ -304,7 +320,7 @@ function render(data) {
   const age = (Date.now() - Date.parse(data.updated_at)) / 60000;
   $("#updated").textContent = "Live · data from " + utc(data.updated_at) + " · the collector refreshes it every " +
     Math.round(data.refresh_seconds / 60) + " minutes" + (age > 25 ? " · last refresh " + Math.round(age) + " minutes ago, check the collector" : "") +
-    (data.hawk_ok ? "" : " · some Hawk data is stale this pass");
+    (data.errors?.length ? " · this refresh could not reach " + data.errors.join(", ") + ", so those parts show the last good data" : "");
   const banner = $("#phase");
   banner.hidden = data.phase !== "smoke";
   banner.textContent = "The campaign has not launched yet. This page shows the two smoke runs (20-minute agent budgets) as test data.";
