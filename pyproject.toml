@@ -36,7 +36,7 @@ inferencebench = [
     "assets/scripts/*.py",
     "assets/scripts/*.sh",
     "assets/sandboxes/compose.yaml", "assets/sandboxes/runpod.yaml", "Dockerfile", "eval.yaml",
-    "upstream.lock", "patches/*.patch",
+    "upstream.lock", "patches/*.patch", "utils/harnesses/cli/*.md",
     "upstream/**/*", "upstream/.gitignore", "upstream/containers/other_home_data/.codex/*",
 ]
 

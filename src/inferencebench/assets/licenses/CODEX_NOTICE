@@ -1,0 +1,9 @@
+OpenAI Codex fallback instructions
+
+Source: https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/models-manager/prompt.md
+Copyright 2025 OpenAI. Licensed under the Apache License 2.0; see CODEX_LICENSE.
+
+utils/harnesses/cli/codex_fallback_instructions.md is the instruction text
+Codex 0.154.0 sends for a model missing from its catalog: prompt.md without the
+update_plan sections Codex removes when that tool is disabled. It is copied
+unchanged so a context-only model catalog keeps Codex's generic instructions.

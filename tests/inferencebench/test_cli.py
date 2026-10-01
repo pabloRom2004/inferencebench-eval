@@ -2,6 +2,7 @@
 
 import functools
 import importlib
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -113,6 +114,53 @@ def test_cli_continuation_and_scoring(local_task, monkeypatch, harness, continue
         assert all(
             "start_server.sh" not in request.input[-1].text for request in requests
         )
+
+
+@pytest.mark.parametrize(
+    "overrides,limit",
+    [({}, 787_500), ({"model_auto_compact_token_limit": "500000"}, 500_000)],
+)
+async def test_codex_catalog_gives_unlisted_model_its_context(
+    monkeypatch, overrides, limit
+):
+    """Give a model missing from Codex's catalog its served context, keeping fallback tools and instructions."""
+    written = {}
+
+    class Sandbox:
+        """Capture the catalog the adapter writes into the sample sandbox."""
+
+        async def write_file(self, path, contents):
+            """Record one sandbox file."""
+            written[path] = contents
+
+    model = get_model("openrouter/openai/gpt-6-sol", api_key="unused")
+    monkeypatch.setattr(UTILS, "get_model", lambda name=None: model)
+    monkeypatch.setattr(UTILS, "sandbox", lambda name=None: Sandbox())
+    options = await UTILS._context_args(
+        "codex_cli", {"config_overrides": overrides}, 1_050_000
+    )
+    [(path, catalog)] = written.items()
+    assert options["config_overrides"] == {
+        "model_context_window": "1050000",
+        **overrides,
+        "model_catalog_json": path,
+    }
+    [entry] = json.loads(catalog)["models"]
+    assert entry["slug"] == "openai/gpt-6-sol"
+    assert entry["context_window"] == entry["max_context_window"] == 1_050_000
+    assert entry["auto_compact_token_limit"] == limit
+    assert entry["apply_patch_tool_type"] is None
+    assert entry["shell_type"] == "unified_exec"
+    assert entry["model_messages"]["instructions_template"].startswith(
+        "You are a coding agent running in the Codex CLI"
+    )
+
+    # OpenAI models keep Codex's own catalog entry.
+    openai = get_model("openai/gpt-6-sol", api_key="unused")
+    monkeypatch.setattr(UTILS, "get_model", lambda name=None: openai)
+    options = await UTILS._context_args("codex_cli", {}, 1_050_000)
+    assert "model_catalog_json" not in options["config_overrides"]
+    assert len(written) == 1
 
 
 @pytest.mark.parametrize(

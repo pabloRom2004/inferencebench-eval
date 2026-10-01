@@ -208,6 +208,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 
 ### [18] - 2026-09-30
 
+- Codex uses the served context and compacts at 75% of it for models from non-OpenAI providers such as OpenRouter. A one-model catalog carries the context with Codex's fallback tools and instructions; Codex had capped these models at 272,000 tokens and compacted at 244,800.
 - CLI harnesses (Claude Code, Codex and the others) no longer crash when they reach `agent_seconds`; the deadline flag is recorded in the sample store.
 - Default judge model is GPT-6.1 Sol.
 - Default budget is 8 hours of wall-clock time (`agent_seconds: 28800`) with no token limit; the prompt points the agent at `./timer.sh` instead of token reminders when a deadline is set.

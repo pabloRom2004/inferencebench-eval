@@ -6,11 +6,13 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from inspect_ai.model import get_model, get_model_info
+from inspect_ai.model import ModelName, get_model, get_model_info
 from inspect_ai.model._generate_config import active_generate_config
 from inspect_ai.util import sandbox
 
 CLI_HARNESSES = ("claude_code", "codex_cli", "gemini_cli", "kimi_code", "opencode")
+CODEX_AUTO_COMPACT_PERCENT = 75
+CODEX_FALLBACK_INSTRUCTIONS = Path(__file__).with_name("codex_fallback_instructions.md")
 OPENCODE_CONTEXT_FRACTION = 2
 OPENCODE_MIN_RESERVED_TOKENS = 8_000
 OPENCODE_MIN_PRESERVE_RECENT_TOKENS = 4_000
@@ -70,7 +72,7 @@ def _opencode_timeout_args(
     return {**args, "env": env}
 
 
-def _context_args(
+async def _context_args(
     harness: str, args: dict[str, Any], context_window: int | None
 ) -> dict[str, Any]:
     """Apply shared context and output settings through each CLI's native options."""
@@ -92,10 +94,16 @@ def _context_args(
             env.setdefault("CLAUDE_CODE_MAX_OUTPUT_TOKENS", str(output))
         env.setdefault("CLAUDE_CODE_TOTAL_TOKENS_REMINDER", "off")
     elif harness == "codex_cli" and context:
-        args["config_overrides"] = {
+        overrides = {
             "model_context_window": str(context),
             **(args.get("config_overrides") or {}),
         }
+        slug = _codex_passthrough_slug(args)
+        if slug is not None and "model_catalog_json" not in overrides:
+            overrides["model_catalog_json"] = await _codex_catalog(
+                slug, context, overrides
+            )
+        args["config_overrides"] = overrides
     elif harness == "kimi_code" and context:
         args.setdefault("max_context_size", context)
     elif harness == "opencode":
@@ -140,6 +148,61 @@ def _context_args(
     if env:
         args["env"] = env
     return args
+
+
+def _codex_passthrough_slug(args: dict[str, Any]) -> str | None:
+    """Return the model name Inspect SWE passes to Codex unchanged, as it does for non-OpenAI models."""
+    from inspect_swe._codex_cli.model_catalog import is_openai_derived_api
+
+    model = get_model(args.get("model"))
+    name = ModelName(model)
+    if (
+        args.get("model_config") is not None
+        or is_openai_derived_api(model.api)
+        or name.api == "openai"
+    ):
+        return None
+    return name.name
+
+
+async def _codex_catalog(slug: str, context: int, overrides: dict[str, str]) -> str:
+    """Write a one-model Codex catalog that keeps fallback metadata but the served context."""
+    # Codex clamps model_context_window to the catalog's max_context_window, which is
+    # 272,000 for a model missing from its catalog, and compacts at 90% of the result.
+    # The other fields and instructions reproduce Codex 0.154.0's fallback metadata.
+    # This catalog replaces the bundled one, so spawn_agent lists no model overrides.
+    limit = overrides.get("model_auto_compact_token_limit")
+    compact = (
+        int(limit) if limit is not None else context * CODEX_AUTO_COMPACT_PERCENT // 100
+    )
+    model = {
+        "slug": slug,
+        "display_name": slug,
+        "description": None,
+        "supported_reasoning_levels": [],
+        "shell_type": "unified_exec",
+        "visibility": "none",
+        "supported_in_api": True,
+        "priority": 99,
+        "upgrade": None,
+        "model_messages": {
+            "instructions_template": CODEX_FALLBACK_INSTRUCTIONS.read_text(
+                encoding="utf-8"
+            )
+        },
+        "include_apps_usage_instructions": False,
+        "support_verbosity": False,
+        "default_verbosity": None,
+        "apply_patch_tool_type": None,
+        "truncation_policy": {"mode": "bytes", "limit": 10_000},
+        "context_window": context,
+        "max_context_window": context,
+        "auto_compact_token_limit": compact,
+        "experimental_supported_tools": [],
+    }
+    path = f"/tmp/inspect-codex-{uuid4().hex}.json"
+    await sandbox("default").write_file(path, json.dumps({"models": [model]}))
+    return path
 
 
 def _configure_opencode_compaction(config: dict[str, Any], context: int | None) -> None:

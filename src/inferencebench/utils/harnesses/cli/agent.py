@@ -64,7 +64,7 @@ async def run_cli(
     on_error: Callable[[RuntimeError], bool] | None,
 ) -> AgentState:
     """Run one native CLI session with shared context, timeouts, and continuation handling."""
-    options = _context_args(harness, args, context_window)
+    options = await _context_args(harness, args, context_window)
     if harness in ("gemini_cli", "opencode"):
         config = get_model().config.merge(active_generate_config())
         if harness == "gemini_cli":
