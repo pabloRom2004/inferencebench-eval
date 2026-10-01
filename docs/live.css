@@ -122,7 +122,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
 /* Totals */
 .totals {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 18px 28px;
   align-items: end;
 }
@@ -201,6 +201,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
 }
 
 .chart-card {
+  min-width: 0;
   padding-top: 10px;
   border-top: 1px solid var(--rule);
 }
@@ -222,6 +223,8 @@ code { font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
   position: relative;
   height: 230px;
 }
+
+.chartbox canvas { max-width: 100%; }
 
 .chart-empty {
   position: absolute;
@@ -387,7 +390,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
   .wrap { padding: 32px 16px 48px; }
   h1 { font-size: 23px; }
   .standfirst { font-size: 15px; }
-  .totals { grid-template-columns: 1fr; }
-  .charts { grid-template-columns: 1fr; }
-  .run-grid { grid-template-columns: 1fr; }
+  .totals { grid-template-columns: minmax(0, 1fr); }
+  .charts { grid-template-columns: minmax(0, 1fr); }
+  .run-grid { grid-template-columns: minmax(0, 1fr); }
 }
