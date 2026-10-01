@@ -1,7 +1,7 @@
 {
  "schema_version": 1,
  "phase": "smoke",
- "updated_at": "2026-10-01T23:42:24Z",
+ "updated_at": "2026-10-01T23:52:24Z",
  "refresh_seconds": 600,
  "budget_usd": 2500,
  "spend": {
@@ -11,9 +11,9 @@
   "since": "2026-10-01T18:14:07Z",
   "runpod_rate_per_hour": 0.005,
   "runpod_balance": 124.9,
-  "runpod_balance_change": -7.47,
-  "runpod_balance_change_since": "2026-10-01T18:14:07Z",
-  "checked_at": "2026-10-01T23:42:30Z"
+  "runpod_balance_change": -0.55,
+  "runpod_balance_change_since": "2026-10-01T23:07:26Z",
+  "checked_at": "2026-10-01T23:52:27Z"
  },
  "errors": [],
  "baselines": {
