@@ -38,6 +38,10 @@ while pid > 1:
     fields = dict(line.split(':', 1) for line in Path(f'/proc/{pid}/status').read_text().splitlines())
     pid = int(fields['PPid'])
 
+# A process in uninterruptible I/O (D) takes the stop only when the I/O returns; once
+# signalled it runs no user code, so it counts as frozen rather than blocking the archive.
+signalled = set()
+deadline = time.monotonic() + 60
 while True:
     running = False
     for path in Path('/proc').glob('[0-9]*/status'):
@@ -46,12 +50,15 @@ while True:
             continue
         try:
             fields = dict(line.split(':', 1) for line in path.read_text().splitlines())
-            if fields['State'].strip()[0] not in 'TtZX':
-                os.kill(pid, signal.SIGSTOP)
-                running = True
+            state = fields['State'].strip()[0]
+            if state in 'TtZX' or (state == 'D' and pid in signalled):
+                continue
+            os.kill(pid, signal.SIGSTOP)
+            signalled.add(pid)
+            running = True
         except (FileNotFoundError, ProcessLookupError):
             pass
-    if not running:
+    if not running or time.monotonic() > deadline:
         break
     time.sleep(0.01)
 PY
