@@ -1,21 +1,34 @@
 {
  "schema_version": 1,
  "phase": "campaign",
- "updated_at": "2026-10-02T09:33:12Z",
+ "updated_at": "2026-10-02T09:44:17Z",
  "refresh_seconds": 600,
  "budget_usd": 3500,
  "spend": {
-  "openrouter_usd": 599.27,
-  "runpod_usd": 298.94,
-  "total_usd": 898.21,
+  "openrouter_usd": 651.62,
+  "runpod_usd": 313.02,
+  "total_usd": 964.64,
   "since": "2026-10-02T01:52:26Z",
   "runpod_rate_per_hour": 42.218,
-  "runpod_balance": 121.76,
-  "runpod_balance_change": -38.67,
-  "runpod_balance_change_since": "2026-10-02T08:51:48Z",
-  "checked_at": "2026-10-02T09:44:16Z"
+  "runpod_balance": 107.68,
+  "runpod_balance_change": -31.63,
+  "runpod_balance_change_since": "2026-10-02T09:22:37Z",
+  "checked_at": "2026-10-02T10:07:46Z"
  },
- "errors": [],
+ "errors": [
+  "claude-A: HawkError",
+  "codex-A: HawkError",
+  "opencode-A: HawkError",
+  "claude-B: HawkError",
+  "codex-B: HawkError",
+  "opencode-B: HawkError",
+  "claude-C: HawkError",
+  "codex-C: HawkError",
+  "opencode-C: HawkError",
+  "claude-D: HawkError",
+  "codex-D: HawkError",
+  "opencode-D: HawkError"
+ ],
  "baselines": {
   "D": "measured by a local run on 24 September with the same seed pair and evaluator settings",
   "A": "measured by ib-smoke-opencode-b2da29c-z5rzakmq2wwc8vdg"
@@ -49,7 +62,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "codex",
@@ -79,7 +93,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "opencode",
@@ -109,7 +124,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "claude",
@@ -139,7 +155,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "codex",
@@ -169,7 +186,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "opencode",
@@ -203,7 +221,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "claude",
@@ -233,7 +252,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "codex",
@@ -263,7 +283,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "opencode",
@@ -293,7 +314,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "claude",
@@ -323,7 +345,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "codex",
@@ -353,7 +376,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   },
   {
    "key": "opencode",
@@ -383,7 +407,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T09:44:17Z"
   }
  ]
 }
