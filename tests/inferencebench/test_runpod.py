@@ -5,11 +5,12 @@ import importlib
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import asyncssh
 import httpx
@@ -17,6 +18,7 @@ import pytest
 import yaml
 from asyncssh.misc import async_context_manager
 from inspect_ai import eval_async
+from inspect_ai._util.asyncfiles import AsyncFilesystem
 from inspect_ai.agent import as_solver
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import ModelOutput, get_model
@@ -48,12 +50,13 @@ def provider(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def remove_mock_logs():
-    """Remove only mock evaluation logs created by this test, keeping the log directory flat."""
+    """Remove only mock evaluation logs, and their retained checkpoints, created by this test."""
     before = set(Path("logs").glob("*.eval"))
     yield
     for path in set(Path("logs").glob("*.eval")) - before:
         if read_eval_log(path, header_only=True).eval.model.startswith("mockllm/"):
             path.unlink()
+            shutil.rmtree(path.with_suffix(".checkpoints"), ignore_errors=True)
 
 
 def test_provider_selection():
@@ -80,33 +83,57 @@ async def test_connect_timeout_retries(provider, monkeypatch, failures):
     monkeypatch.setattr(asyncssh, "connect", connect_context)
     if failures == 3:
         with pytest.raises(SandboxUnavailableError, match="test-pod: TimeoutError"):
-            async with provider._connect():
-                pytest.fail("A command cannot start without a connection")
+            await provider._connect()
     else:
-        async with provider._connect() as actual:
-            assert actual is connection
-        connection.__aexit__.assert_awaited_once()
+        assert await provider._connect() is connection
     assert connect.await_count == min(failures + 1, 3)
 
 
-async def test_connect_never_replays_command_or_auth_failure(provider, monkeypatch):
-    """Do not retry after yielding a connection, or when the pinned identity is rejected."""
-    connection = AsyncMock()
-    connect = AsyncMock(return_value=connection)
-    @async_context_manager
-    async def connect_context(*args, **kwargs):
-        return await connect(*args, **kwargs)
+async def test_connection_shared_until_closed(provider, monkeypatch):
+    """Reuse one authenticated connection and open another only after it has closed."""
+    first, second = MagicMock(), MagicMock()
+    first.is_closed.return_value = second.is_closed.return_value = False
+    connect = AsyncMock(side_effect=[first, second])
+    monkeypatch.setattr(asyncssh, "connect", connect)
+    assert await provider._connect() is first
+    assert await provider._connect() is first
+    first.is_closed.return_value = True
+    assert await provider._connect() is second
+    assert connect.await_count == 2
+    provider._disconnect()
+    second.close.assert_called_once()
 
-    monkeypatch.setattr(asyncssh, "connect", connect_context)
-    with pytest.raises(TimeoutError, match="command already started"):
-        async with provider._connect():
-            raise TimeoutError("command already started")
+
+async def test_connect_never_replays_command_or_auth_failure(provider, monkeypatch):
+    """Retry only a session sshd refused, never a sent command or a rejected host identity."""
+    shared, dedicated = MagicMock(), MagicMock()
+    shared.is_closed.return_value = False
+    shared.create_process = AsyncMock(side_effect=asyncssh.ConnectionLost("command already sent"))
+    connect = AsyncMock(side_effect=[shared, dedicated])
+    monkeypatch.setattr(asyncssh, "connect", connect)
+    with pytest.raises(SandboxUnavailableError, match="command already sent"):
+        await provider.exec(["true"])
     connect.assert_awaited_once()
+    shared.create_process.side_effect = asyncssh.ChannelOpenError(
+        asyncssh.OPEN_REQUEST_SESSION_FAILED, "exec request failed"
+    )
+    with pytest.raises(SandboxUnavailableError, match="exec request failed"):
+        await provider.exec(["true"])
+    connect.assert_awaited_once()
+    # A refused session ran nothing, so it moves to a connection of its own.
+    shared.create_process.side_effect = asyncssh.ChannelOpenError(
+        asyncssh.OPEN_CONNECT_FAILED, "open failed"
+    )
+    dedicated.create_process = AsyncMock(side_effect=asyncssh.ConnectionLost("dedicated"))
+    with pytest.raises(SandboxUnavailableError, match="dedicated"):
+        await provider.exec(["true"])
+    assert connect.await_count == 2
+    dedicated.close.assert_called_once()
+    provider._disconnect()
     connect.reset_mock(side_effect=True)
     connect.side_effect = asyncssh.HostKeyNotVerifiable("wrong host")
     with pytest.raises(asyncssh.HostKeyNotVerifiable):
-        async with provider._connect():
-            pytest.fail("Wrong host must not be accepted")
+        await provider._connect()
     connect.assert_awaited_once()
 
 
@@ -169,17 +196,18 @@ async def test_idle_ssh_connection(provider, keepalive):
             provider.port = network.sockets[0].getsockname()[1]
             provider.config["ssh_keepalive_interval_seconds"] = 0.1 if keepalive else 0
             try:
-                async with provider._connect() as connection:
-                    result = await connection.run("prepare", timeout=3)
-                    if keepalive:
-                        assert result.exit_status == 0
-                        assert result.stdout == "preparation complete"
-                    else:
-                        assert result.exit_status is None
-                        assert result.stdout == ""
+                connection = await provider._connect()
+                result = await connection.run("prepare", timeout=3)
+                if keepalive:
+                    assert result.exit_status == 0
+                    assert result.stdout == "preparation complete"
+                else:
+                    assert result.exit_status is None
+                    assert result.stdout == ""
             except asyncssh.ConnectionLost:
                 assert not keepalive
             finally:
+                provider._disconnect()
                 if handlers:
                     await asyncio.gather(*handlers)
 
@@ -441,13 +469,17 @@ def run_evaluation(task, args):
 ''')
     (context / "evaluator.py").write_text('''#!/usr/bin/python3
 """Return synthetic measurements solely to test Inspect's provider and scoring plumbing."""
-import json, os, socket, sys
+import json, os, socket, sys, tarfile
 from pathlib import Path
 folder = Path('/tmp/inferencebench')
 operation = sys.argv[2]
 metrics = {'profiles': {'burst': {'success_count': 1, 'ttft': {'p50': 2 if operation == 'prepare' else 1}}}, 'quality_check': {'pass': True}}
 if operation == 'install':
     Path('/opt/inferencebench/src/eval/inference/bin/launch_supervised_server.sh').write_text('trusted')
+    with tarfile.open(folder / 'upstream.tar') as archive:
+        timer = archive.extractfile('upstream/src/utils/create_timer.sh').read()
+    Path('/opt/inferencebench/src/utils').mkdir(parents=True, exist_ok=True)
+    Path('/opt/inferencebench/src/utils/create_timer.sh').write_bytes(timer)
     sys.exit(0)
 if operation == 'prepare':
     options = json.loads((folder / 'options.json').read_text())
@@ -591,6 +623,28 @@ async def test_linux_transport_and_mock_evaluation(docker_pods, monkeypatch, tmp
         assert connected.stdout == "diagnostic-connection"
         await env.write_file("nested/file.bin", b"\x00hello")
         assert await env.read_file("nested/file.bin", text=False) == b"\x00hello"
+        connect = asyncssh.connect
+        connections = []
+
+        async def counted_connect(*args, **kwargs):
+            """Record each new SSH connection."""
+            connections.append(await connect(*args, **kwargs))
+            return connections[-1]
+
+        with monkeypatch.context() as patch:
+            patch.setattr(asyncssh, "connect", counted_connect)
+            env._disconnect()
+            for _ in range(3):
+                assert (await env.exec(["true"])).success
+                assert await env.read_file("nested/file.bin", text=False) == b"\x00hello"
+            # Commands share one connection and files another.
+            assert len(connections) == 2
+            # sshd allows 10 sessions per connection; the rest each get their own.
+            results = await asyncio.gather(
+                *[env.exec(["sleep", "2"], timeout=30) for _ in range(12)]
+            )
+            assert all(result.success for result in results)
+            assert len(connections) > 2
         result = await env.exec(
             [
                 "python3",
@@ -725,25 +779,33 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
         return await connect(*args, **kwargs)
 
     async def poll_with_disconnect(self, *args, **kwargs):
-        """Inject the observed failure through the genuine Inspect remote-process path."""
+        """Drop the shared connection under a poll, through the genuine Inspect remote-process path."""
         nonlocal injected, fail_connection
         if not injected and "exec_remote_poll" in str(kwargs.get("input", "")):
             injected = fail_connection = True
+            if self._ssh is not None:
+                self._ssh.close()
+                await self._ssh.wait_closed()
         return await execute(self, *args, **kwargs)
 
     monkeypatch.setattr(asyncssh, "connect", interrupted_connect)
     monkeypatch.setattr(RunPodSandbox, "exec", poll_with_disconnect)
-    [log] = await eval_async(
-        task,
-        model=subject,
-        model_roles={"integrity": judge},
-        log_dir="logs",
-    )
+    # Checkpoint storage needs the shared filesystem that inspect's synchronous eval() opens.
+    async with AsyncFilesystem():
+        [log] = await eval_async(
+            task,
+            model=subject,
+            model_roles={"integrity": judge},
+            log_dir="logs",
+            # The error case grades the partial submission, as original.yaml does.
+            score_on_error=harness == "react_error",
+        )
     assert log.status == ("error" if harness == "react_error" else "success"), log.error
     if harness == "react_error":
         assert "provider failure after a real sandbox edit" in log.samples[0].error.message
     if harness == "claude_code":
-        assert injected
+        # The poll reconnected and recovered from the lost handshake.
+        assert injected and not fail_connection
         sample = read_eval_log(log.location, resolve_attachments=True).samples[0]
         assert any(
             "Kernel Optimization" in message.text
@@ -766,23 +828,17 @@ python3 -c 'import time,urllib.request; time.sleep(1); print(urllib.request.urlo
 
 async def test_sftp_allowance_scales_with_payload(provider, monkeypatch):
     """Give large transfers time proportional to their size and report a cut-off transfer as a timeout."""
-    from contextlib import asynccontextmanager
-
     assert provider.transfer_allowance(0) == provider.config["api_timeout_seconds"]
     assert provider.transfer_allowance(150 * 1024 * 1024) >= 600
 
-    class Connection:
-        """Fail the file channel the way asyncssh does when the timeout cancels it."""
+    class Files:
+        """Fail the transfer the way asyncssh does when the timeout cancels it."""
 
-        def start_sftp_client(self):
+        async def makedirs(self, *args, **kwargs):
+            """Raise asyncssh's empty error for a transfer stopped mid-way."""
             raise RuntimeError("")
 
-    @asynccontextmanager
-    async def connect():
-        """Hand out the failing connection without touching the network."""
-        yield Connection()
-
-    monkeypatch.setattr(provider, "_connect", connect)
+    monkeypatch.setattr(provider, "_file_client", AsyncMock(return_value=Files()))
     with pytest.raises(TimeoutError, match="allowance"):
         await provider.write_file("bundle.tar.gz", b"data")
 

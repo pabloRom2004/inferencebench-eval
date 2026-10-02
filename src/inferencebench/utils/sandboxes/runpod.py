@@ -28,6 +28,12 @@ from inspect_ai.util import (
 # Slowest link the transfer allowance assumes; larger payloads get proportionally more time.
 TRANSFER_FLOOR_BYTES_PER_SECOND = 256 * 1024
 
+# Per-channel receive window: asyncssh's 2 MiB default caps a distant pod at a few MB/s.
+RECEIVE_WINDOW_BYTES = 16 * 1024 * 1024
+
+# Parallel SFTP reads in flight, enough to fill the receive window.
+SFTP_READ_REQUESTS = 128
+
 
 def _error_detail(error: BaseException) -> str:
     """Describe a failed API call, keeping the server's explanation when it sent one."""
@@ -72,6 +78,13 @@ class RunPodSandbox(SandboxEnvironment):
         self.name = self.name_prefix + uuid.uuid4().hex
         self.folder = Path("run-artifacts/runpod") / self.name
         self.ssh_folder: tempfile.TemporaryDirectory[str] | None = None
+        # Reusing authenticated connections saves a handshake of several round trips per call.
+        self._ssh: asyncssh.SSHClientConnection | None = None
+        self._files: tuple[asyncssh.SSHClientConnection, asyncssh.SFTPClient] | None
+        self._files = None
+        self._ssh_lock = asyncio.Lock()
+        # File handles that read_file closes without waiting for the reply.
+        self._closing: set[asyncio.Task[None]] = set()
 
     @property
     def resource_id(self) -> str | None:
@@ -122,8 +135,7 @@ class RunPodSandbox(SandboxEnvironment):
         record.update(name=self.name, pod_id=self.pod_id, status=status, **details)
         path.write_text(json.dumps(record, indent=2))
 
-    @asynccontextmanager
-    async def _connect(self) -> AsyncIterator[asyncssh.SSHClientConnection]:
+    async def _open_connection(self) -> asyncssh.SSHClientConnection:
         """Retry connection failures before sending any command; never replay remote work."""
         for attempt in range(self.config["api_retry_attempts"]):
             try:
@@ -137,6 +149,7 @@ class RunPodSandbox(SandboxEnvironment):
                     connect_timeout=self.config["api_timeout_seconds"],
                     keepalive_interval=self.config["ssh_keepalive_interval_seconds"],
                     keepalive_count_max=self.config["ssh_keepalive_count_max"],
+                    window=RECEIVE_WINDOW_BYTES,
                 )
                 break
             except (OSError, asyncssh.ConnectionLost) as error:
@@ -145,8 +158,36 @@ class RunPodSandbox(SandboxEnvironment):
                         f"RunPod SSH connection failed for {self.pod_id}: {type(error).__name__}: {error}"
                     ) from error
                 await asyncio.sleep(self.config["poll_interval_seconds"])
-        async with connection:
-            yield connection
+        return connection
+
+    async def _connect(self) -> asyncssh.SSHClientConnection:
+        """Share one command connection, opening a new one only after the previous one closed."""
+        async with self._ssh_lock:
+            if self._ssh is None or self._ssh.is_closed():
+                self._ssh = await self._open_connection()
+            return self._ssh
+
+    async def _file_client(self) -> asyncssh.SFTPClient:
+        """Share one file channel on its own connection, where command channels cannot crowd it out."""
+        async with self._ssh_lock:
+            if self._files is None or self._files[0].is_closed():
+                connection = await self._open_connection()
+                try:
+                    self._files = (connection, await connection.start_sftp_client())
+                except BaseException:
+                    connection.close()
+                    raise
+            return self._files[1]
+
+    def _disconnect(self) -> None:
+        """Close the shared connections so the next call opens new ones."""
+        # A close sent on a closing channel would leave asyncssh an unretrieved error.
+        for closing in self._closing:
+            closing.cancel()
+        for connection in [self._ssh, self._files[0] if self._files else None]:
+            if connection is not None:
+                connection.close()
+        self._ssh = self._files = None
 
     async def connection(self, *, user: str | None = None) -> SandboxConnection:
         """Expose a pinned SSH command for live debugging, keeping its private key outside the repository."""
@@ -188,6 +229,8 @@ class RunPodSandbox(SandboxEnvironment):
 
     async def _wait_ready(self, previous_boot: str | None) -> None:
         """Wait for authenticated SSH and, after restart, a newly generated boot marker."""
+        # A restart ends the old connections and may move the SSH port.
+        self._disconnect()
         deadline = time.monotonic() + self.config["startup_timeout_seconds"]
         while time.monotonic() < deadline:
             pod = await self._request("GET", f"/pods/{self.pod_id}")
@@ -324,6 +367,7 @@ class RunPodSandbox(SandboxEnvironment):
             try:
                 self._record("terminated")
             finally:
+                self._disconnect()
                 # Later connection queries must report the pod gone rather than touch removed files.
                 if self.ssh_folder is not None:
                     self.ssh_folder.cleanup()
@@ -401,34 +445,45 @@ class RunPodSandbox(SandboxEnvironment):
                 "RunPod SSH closed without a command completion record"
             )
 
+        dedicated = None
         try:
-            async with self._connect() as connection:
-                async with connection.create_process(
+            try:
+                process = await (await self._connect()).create_process(
                     shlex.join(command), encoding=None
-                ) as process:
-                    if input is not None:
-                        process.stdin.write(
-                            input.encode() if isinstance(input, str) else input
-                        )
-                    process.stdin.write_eof()
-                    async with asyncio.timeout(
-                        timeout + self.config["api_timeout_seconds"]
-                        if timeout is not None
-                        else None
-                    ):
-                        stdout, stderr = await asyncio.gather(
-                            read_tail(process.stdout), read_tail(process.stderr)
-                        )
-                        process.close()
-                        await process.wait_closed()
-                    returncode = stdout[1]
-                    if returncode != stderr[1]:
-                        raise SandboxUnavailableError(
-                            "RunPod SSH returned inconsistent command completion records"
-                        )
-                    if timeout is not None and returncode in (124, 137):
-                        raise TimeoutError("RunPod command exceeded its timeout")
-                    return ExecResult(returncode == 0, returncode, stdout[0], stderr[0])
+                )
+            except asyncssh.ChannelOpenError as error:
+                # Only a refused exec request was sent; a refused channel ran nothing,
+                # as when sshd caps sessions per connection (MaxSessions).
+                if error.code == asyncssh.OPEN_REQUEST_SESSION_FAILED:
+                    raise
+                dedicated = await self._open_connection()
+                process = await dedicated.create_process(
+                    shlex.join(command), encoding=None
+                )
+            async with process:
+                if input is not None:
+                    process.stdin.write(
+                        input.encode() if isinstance(input, str) else input
+                    )
+                process.stdin.write_eof()
+                async with asyncio.timeout(
+                    timeout + self.config["api_timeout_seconds"]
+                    if timeout is not None
+                    else None
+                ):
+                    stdout, stderr = await asyncio.gather(
+                        read_tail(process.stdout), read_tail(process.stderr)
+                    )
+                    process.close()
+                    await process.wait_closed()
+            returncode = stdout[1]
+            if returncode != stderr[1]:
+                raise SandboxUnavailableError(
+                    "RunPod SSH returned inconsistent command completion records"
+                )
+            if timeout is not None and returncode in (124, 137):
+                raise TimeoutError("RunPod command exceeded its timeout")
+            return ExecResult(returncode == 0, returncode, stdout[0], stderr[0])
         except TimeoutError:
             raise
         except (asyncssh.Error, OSError) as error:
@@ -436,6 +491,8 @@ class RunPodSandbox(SandboxEnvironment):
                 f"RunPod SSH failed for {self.pod_id}: {error}"
             ) from error
         finally:
+            if dedicated is not None:
+                dedicated.close()
             for drainer in drainers:
                 drainer.cancel()
             await asyncio.gather(*drainers, return_exceptions=True)
@@ -451,13 +508,18 @@ class RunPodSandbox(SandboxEnvironment):
     async def _sftp(
         self, transfer_bytes: int = 0
     ) -> AsyncIterator[asyncssh.SFTPClient]:
-        """Open an authenticated file channel with a time allowance scaled to the transfer size."""
+        """Use the shared file channel with a time allowance scaled to the transfer size."""
         allowance = self.transfer_allowance(transfer_bytes)
+        sftp = await self._file_client()
         try:
-            async with self._connect() as connection:
-                async with asyncio.timeout(allowance):
-                    async with connection.start_sftp_client() as sftp:
-                        yield sftp
+            async with asyncio.timeout(allowance):
+                yield sftp
+        except (asyncssh.SFTPConnectionLost, asyncssh.SFTPNoConnection):
+            # A file channel lost while its connection stays open is replaced on the next call.
+            if self._files is not None and self._files[1] is sftp:
+                self._files[0].close()
+                self._files = None
+            raise
         except asyncssh.SFTPNoSuchFile as error:
             raise FileNotFoundError(str(error)) from error
         except asyncssh.SFTPPermissionDenied as error:
@@ -489,23 +551,39 @@ class RunPodSandbox(SandboxEnvironment):
         """Read a file with Inspect's size limit, raising rather than returning truncated data."""
         path = str(PurePosixPath(self.working_dir) / file)
         async with self._sftp(SandboxEnvironmentLimits.MAX_READ_FILE_SIZE) as sftp:
-            if (await sftp.stat(path)).type == asyncssh.FILEXFER_TYPE_DIRECTORY:
-                raise IsADirectoryError(path)
-            async with sftp.open(path, "rb") as remote:
+            # Sending the type check with the open saves a round trip per read.
+            attributes, remote = await asyncio.gather(
+                sftp.stat(path), sftp.open(path, "rb", max_requests=SFTP_READ_REQUESTS)
+            )
+            try:
+                if attributes.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
+                    raise IsADirectoryError(path)
                 data = cast(
                     bytes,
                     await remote.read(SandboxEnvironmentLimits.MAX_READ_FILE_SIZE + 1),
                 )
+            finally:
+                # Later requests do not depend on this handle, so its close reply is not
+                # awaited, saving another round trip.
+                closing = asyncio.create_task(remote.close())
+                self._closing.add(closing)
+                closing.add_done_callback(self._closed)
         if len(data) > SandboxEnvironmentLimits.MAX_READ_FILE_SIZE:
             raise OutputLimitExceededError(
                 SandboxEnvironmentLimits.MAX_READ_FILE_SIZE_STR, None
             )
         return data.decode() if text else data
 
+    def _closed(self, task: asyncio.Task[None]) -> None:
+        """Forget a finished background close; a failed close only means the channel is gone."""
+        self._closing.discard(task)
+        if not task.cancelled():
+            task.exception()
+
     async def download(self, remote: str, local: str) -> None:
         """Transfer trusted evaluator artifacts without embedding binary contents in tool output."""
         async with self._sftp(4 * 1024**3) as sftp:
-            await sftp.get(remote, local)
+            await sftp.get(remote, local, max_requests=SFTP_READ_REQUESTS)
 
     async def upload(self, local: str, remote: str) -> None:
         """Restore a host artifact into the restarted pod through SFTP."""

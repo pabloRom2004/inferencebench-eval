@@ -208,6 +208,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 
 ### [18] - 2026-09-30
 
+- RunPod commands and file transfers reuse authenticated SSH connections, with larger receive windows and fewer round trips per file read, so checkpoint copies from distant pods run four to seven times faster: an 8 MiB chunk from an India pod to London or Amsterdam took 6.2 to 6.5 s and now takes 0.9 to 1.5 s.
 - Checkpoint snapshots may reach 20 GiB per transfer, so a virtualenv kept in the task folder no longer fails every save.
 - The integrity judge runs outside the agent's checkpoints. Claude Code and Codex runs with checkpointing no longer fail scoring with a duplicate `bridge_messages` key, a scoring-only resume runs the judge instead of skipping it, and the judge no longer writes checkpoints of its own.
 - Checkpoints stay in storage after a run finishes (`retention: retain`).
