@@ -1,33 +1,21 @@
 {
  "schema_version": 1,
  "phase": "campaign",
- "updated_at": "2026-10-02T13:04:14Z",
+ "updated_at": "2026-10-02T13:08:14Z",
  "refresh_seconds": 600,
  "budget_usd": 3500,
  "spend": {
-  "openrouter_usd": 1060.29,
-  "runpod_usd": 448.38,
-  "total_usd": 1508.67,
+  "openrouter_usd": 1090.14,
+  "runpod_usd": 458.89,
+  "total_usd": 1549.03,
   "since": "2026-10-02T01:52:26Z",
   "runpod_rate_per_hour": 42.218,
-  "runpod_balance": 177.54,
-  "runpod_balance_change": 57.78,
-  "runpod_balance_change_since": "2026-10-02T12:11:31Z",
-  "checked_at": "2026-10-02T13:08:01Z"
+  "runpod_balance": 167.03,
+  "runpod_balance_change": 68.37,
+  "runpod_balance_change_since": "2026-10-02T12:38:05Z",
+  "checked_at": "2026-10-02T13:26:55Z"
  },
- "errors": [
-  "codex-A: HawkError",
-  "opencode-A: HawkError",
-  "claude-B: HawkError",
-  "codex-B: HawkError",
-  "opencode-B: HawkError",
-  "claude-C: HawkError",
-  "codex-C: HawkError",
-  "opencode-C: HawkError",
-  "claude-D: HawkError",
-  "codex-D: HawkError",
-  "opencode-D: HawkError"
- ],
+ "errors": [],
  "baselines": {
   "D": "measured by a local run on 24 September with the same seed pair and evaluator settings",
   "A": "measured by ib-smoke-opencode-b2da29c-z5rzakmq2wwc8vdg"
@@ -47,7 +35,7 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 30906,
+   "agent_seconds_used": 31146,
    "deadline": "2026-10-02T20:29:08Z",
    "checkpoints": 33,
    "last_checkpoint_at": "2026-10-02T13:04:22Z",
@@ -77,13 +65,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 37471,
+   "agent_seconds_used": 39278,
    "deadline": "2026-10-02T18:13:36Z",
-   "checkpoints": 56,
-   "last_checkpoint_at": "2026-10-02T12:39:47Z",
+   "checkpoints": 59,
+   "last_checkpoint_at": "2026-10-02T13:10:59Z",
    "restores": 0,
-   "model_calls": 1113,
-   "last_model_call_at": "2026-10-02T12:41:37Z",
+   "model_calls": 1151,
+   "last_model_call_at": "2026-10-02T13:13:25Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -91,8 +79,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:46:14Z"
+   "final": null
   },
   {
    "key": "opencode",
@@ -108,7 +95,7 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 32810,
+   "agent_seconds_used": 34617,
    "deadline": "2026-10-02T19:31:17Z",
    "checkpoints": 27,
    "last_checkpoint_at": "2026-10-02T09:31:09Z",
@@ -122,8 +109,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:46:14Z"
+   "final": null
   },
   {
    "key": "claude",
@@ -139,13 +125,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 28699,
+   "agent_seconds_used": 30506,
    "deadline": "2026-10-02T20:39:48Z",
-   "checkpoints": 42,
-   "last_checkpoint_at": "2026-10-02T12:33:48Z",
+   "checkpoints": 45,
+   "last_checkpoint_at": "2026-10-02T13:16:02Z",
    "restores": 0,
-   "model_calls": 469,
-   "last_model_call_at": "2026-10-02T12:40:11Z",
+   "model_calls": 478,
+   "last_model_call_at": "2026-10-02T13:15:57Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -153,8 +139,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:46:14Z"
+   "final": null
   },
   {
    "key": "codex",
@@ -170,13 +155,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 34693,
+   "agent_seconds_used": 38094,
    "deadline": "2026-10-02T18:33:20Z",
-   "checkpoints": 56,
-   "last_checkpoint_at": "2026-10-02T12:12:36Z",
+   "checkpoints": 62,
+   "last_checkpoint_at": "2026-10-02T13:15:26Z",
    "restores": 0,
-   "model_calls": 1390,
-   "last_model_call_at": "2026-10-02T12:19:20Z",
+   "model_calls": 1479,
+   "last_model_call_at": "2026-10-02T13:17:33Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -184,8 +169,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:26:28Z"
+   "final": null
   },
   {
    "key": "opencode",
@@ -201,13 +185,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 29379,
+   "agent_seconds_used": 32780,
    "deadline": "2026-10-02T20:01:54Z",
-   "checkpoints": 37,
-   "last_checkpoint_at": "2026-10-02T12:16:12Z",
+   "checkpoints": 41,
+   "last_checkpoint_at": "2026-10-02T13:13:46Z",
    "restores": 1,
-   "model_calls": 226,
-   "last_model_call_at": "2026-10-02T12:16:29Z",
+   "model_calls": 241,
+   "last_model_call_at": "2026-10-02T13:14:01Z",
    "tokens": {
     "input": 94076,
     "cache_read": 3934144,
@@ -219,8 +203,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:26:28Z"
+   "final": null
   },
   {
    "key": "claude",
@@ -236,13 +219,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 22073,
+   "agent_seconds_used": 25474,
    "deadline": "2026-10-02T22:03:40Z",
-   "checkpoints": 29,
-   "last_checkpoint_at": "2026-10-02T11:55:29Z",
+   "checkpoints": 32,
+   "last_checkpoint_at": "2026-10-02T13:19:21Z",
    "restores": 0,
-   "model_calls": 288,
-   "last_model_call_at": "2026-10-02T11:57:20Z",
+   "model_calls": 312,
+   "last_model_call_at": "2026-10-02T13:19:08Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -250,8 +233,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:26:28Z"
+   "final": null
   },
   {
    "key": "codex",
@@ -267,13 +249,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 25171,
+   "agent_seconds_used": 28572,
    "deadline": "2026-10-02T21:12:02Z",
-   "checkpoints": 41,
-   "last_checkpoint_at": "2026-10-02T12:20:45Z",
+   "checkpoints": 46,
+   "last_checkpoint_at": "2026-10-02T13:13:47Z",
    "restores": 0,
-   "model_calls": 926,
-   "last_model_call_at": "2026-10-02T12:22:49Z",
+   "model_calls": 1012,
+   "last_model_call_at": "2026-10-02T13:13:33Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -281,8 +263,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:26:28Z"
+   "final": null
   },
   {
    "key": "opencode",
@@ -298,13 +279,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 24142,
+   "agent_seconds_used": 27543,
    "deadline": "2026-10-02T21:29:11Z",
-   "checkpoints": 30,
-   "last_checkpoint_at": "2026-10-02T12:10:50Z",
+   "checkpoints": 35,
+   "last_checkpoint_at": "2026-10-02T13:22:02Z",
    "restores": 1,
-   "model_calls": 215,
-   "last_model_call_at": "2026-10-02T12:19:18Z",
+   "model_calls": 248,
+   "last_model_call_at": "2026-10-02T13:22:05Z",
    "tokens": {
     "input": 248329,
     "cache_read": 14123648,
@@ -316,8 +297,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:26:28Z"
+   "final": null
   },
   {
    "key": "claude",
@@ -333,13 +313,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 26308,
+   "agent_seconds_used": 29709,
    "deadline": "2026-10-02T20:53:05Z",
    "checkpoints": 21,
    "last_checkpoint_at": "2026-10-02T09:11:20Z",
    "restores": 0,
-   "model_calls": 283,
-   "last_model_call_at": "2026-10-02T12:20:01Z",
+   "model_calls": 305,
+   "last_model_call_at": "2026-10-02T13:22:32Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -347,8 +327,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:26:28Z"
+   "final": null
   },
   {
    "key": "codex",
@@ -364,13 +343,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 28919,
+   "agent_seconds_used": 32320,
    "deadline": "2026-10-02T20:09:34Z",
-   "checkpoints": 34,
-   "last_checkpoint_at": "2026-10-02T12:26:21Z",
+   "checkpoints": 39,
+   "last_checkpoint_at": "2026-10-02T13:22:02Z",
    "restores": 0,
-   "model_calls": 729,
-   "last_model_call_at": "2026-10-02T12:26:03Z",
+   "model_calls": 781,
+   "last_model_call_at": "2026-10-02T13:24:32Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -378,8 +357,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:26:28Z"
+   "final": null
   },
   {
    "key": "opencode",
@@ -395,13 +373,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 27462,
+   "agent_seconds_used": 30863,
    "deadline": "2026-10-02T20:33:51Z",
-   "checkpoints": 26,
-   "last_checkpoint_at": "2026-10-02T12:11:11Z",
+   "checkpoints": 29,
+   "last_checkpoint_at": "2026-10-02T13:03:06Z",
    "restores": 1,
-   "model_calls": 142,
-   "last_model_call_at": "2026-10-02T12:26:06Z",
+   "model_calls": 168,
+   "last_model_call_at": "2026-10-02T13:12:01Z",
    "tokens": {
     "input": 1021440,
     "cache_read": 12096576,
@@ -422,8 +400,7 @@
     ]
    ],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T12:26:28Z"
+   "final": null
   }
  ]
 }
