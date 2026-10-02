@@ -1,21 +1,24 @@
 {
  "schema_version": 1,
  "phase": "campaign",
- "updated_at": "2026-10-02T12:38:07Z",
+ "updated_at": "2026-10-02T12:46:14Z",
  "refresh_seconds": 600,
  "budget_usd": 3500,
  "spend": {
-  "openrouter_usd": 1018.0,
-  "runpod_usd": 430.74,
-  "total_usd": 1448.74,
+  "openrouter_usd": 1026.79,
+  "runpod_usd": 434.29,
+  "total_usd": 1461.09,
   "since": "2026-10-02T01:52:26Z",
   "runpod_rate_per_hour": 42.218,
-  "runpod_balance": 195.18,
-  "runpod_balance_change": 61.38,
-  "runpod_balance_change_since": "2026-10-02T11:48:56Z",
-  "checked_at": "2026-10-02T12:46:13Z"
+  "runpod_balance": 191.63,
+  "runpod_balance_change": 68.36,
+  "runpod_balance_change_since": "2026-10-02T12:03:47Z",
+  "checked_at": "2026-10-02T12:49:52Z"
  },
  "errors": [
+  "codex-A: HawkError",
+  "opencode-A: HawkError",
+  "claude-B: HawkError",
   "codex-B: HawkError",
   "opencode-B: HawkError",
   "claude-C: HawkError",
@@ -44,7 +47,7 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 29339,
+   "agent_seconds_used": 29826,
    "deadline": "2026-10-02T20:29:08Z",
    "checkpoints": 32,
    "last_checkpoint_at": "2026-10-02T12:17:14Z",
@@ -88,7 +91,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:46:14Z"
   },
   {
    "key": "opencode",
@@ -118,7 +122,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:46:14Z"
   },
   {
    "key": "claude",
@@ -148,7 +153,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:46:14Z"
   },
   {
    "key": "codex",
