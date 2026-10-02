@@ -1,27 +1,25 @@
 {
  "schema_version": 1,
  "phase": "campaign",
- "updated_at": "2026-10-02T20:49:41Z",
+ "updated_at": "2026-10-02T21:02:00Z",
  "refresh_seconds": 600,
  "budget_usd": 3500,
  "spend": {
-  "openrouter_usd": 1719.73,
-  "runpod_usd": 763.5,
-  "total_usd": 2483.23,
+  "openrouter_usd": 1721.57,
+  "runpod_usd": 767.55,
+  "total_usd": 2489.11,
   "since": "2026-10-02T01:52:26Z",
-  "runpod_rate_per_hour": 21.112,
-  "runpod_balance": 163.63,
-  "runpod_balance_change": -30.37,
+  "runpod_rate_per_hour": 24.629,
+  "runpod_balance": 159.59,
+  "runpod_balance_change": -34.42,
   "runpod_balance_change_since": "2026-10-02T20:05:24Z",
-  "checked_at": "2026-10-02T21:01:58Z"
+  "checked_at": "2026-10-02T21:11:41Z"
  },
- "errors": [
-  "codex-C: HawkError"
- ],
+ "errors": [],
  "baselines": {
   "D": "measured by ib-camp-codex-d-3b2d174-uuyh4tuff852ltpm",
   "A": "measured by ib-camp-codex-a-6fe2a1d-9zl4s85lpkhxlnei",
-  "B": "measured by ib-camp-codex-b-6fe2a1d-5w4z08gt69eus0jk"
+  "B": "measured by ib-camp-opencode-b-6fe2a1-scol6zoczh9jr1nv"
  },
  "runs": [
   {
@@ -33,26 +31,43 @@
    "eval_set_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-a-3b2d174-k7ojpjwl7r9mvftd",
    "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-a-3b2d174-k7ojpjwl7r9mvftd#/samples/2026-10-02T04-11-53-00-00_inference-bench_Dx4kqi4eYahz7NmLUxRxsR.eval/sample/A-21-1337/1/",
    "attempt": 1,
-   "status": "scoring",
-   "hawk_status": "running",
+   "status": "scored",
+   "hawk_status": "complete",
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
    "agent_seconds_used": 57600,
-   "deadline": "2026-10-02T20:29:08Z",
+   "deadline": null,
    "checkpoints": 66,
    "last_checkpoint_at": "2026-10-02T20:22:56Z",
    "restores": 0,
    "model_calls": 439,
    "last_model_call_at": "2026-10-02T20:28:32Z",
-   "tokens": null,
-   "tokens_as_of": null,
-   "tokens_live": false,
-   "cost_usd": null,
-   "grader_cost_usd": null,
-   "speedup_history": [],
+   "tokens": {
+    "input": 24954211,
+    "cache_read": 118528093,
+    "output": 821078
+   },
+   "tokens_as_of": "2026-10-02T20:28:25Z",
+   "tokens_live": true,
+   "cost_usd": 164.9,
+   "grader_cost_usd": 3.56,
+   "speedup_history": [
+    [
+     0.332,
+     1.385
+    ],
+    [
+     15.988,
+     1.385
+    ]
+   ],
    "speedup_note": null,
-   "final": null
+   "final": {
+    "speedup": 2.6224576202926353,
+    "quality_pass": true,
+    "note": null
+   }
   },
   {
    "key": "codex",
@@ -148,18 +163,18 @@
    "eval_set_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-b-3b2d174-czpc1p895cskpdc4",
    "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-b-3b2d174-czpc1p895cskpdc4#/samples/2026-10-02T14-56-31-00-00_inference-bench_MgJWepwdFm4qzzj8XkrVmp.eval/sample/B-21-1337/1/",
    "attempt": 2,
-   "status": "running",
+   "status": "scoring",
    "hawk_status": "running",
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 56894,
+   "agent_seconds_used": 57600,
    "deadline": "2026-10-02T21:01:27Z",
-   "checkpoints": 68,
-   "last_checkpoint_at": "2026-10-02T20:50:21Z",
+   "checkpoints": 69,
+   "last_checkpoint_at": "2026-10-02T21:00:26Z",
    "restores": 1,
-   "model_calls": 681,
-   "last_model_call_at": "2026-10-02T20:52:20Z",
+   "model_calls": 724,
+   "last_model_call_at": "2026-10-02T21:01:23Z",
    "tokens": {
     "input": 10090053,
     "cache_read": 164828500,
@@ -172,23 +187,23 @@
    "speedup_history": [
     [
      0.04,
-     0.015
+     0.016
     ],
     [
      0.247,
-     2.504
+     2.625
     ],
     [
      1.653,
-     13.989
+     14.664
     ],
     [
      4.931,
-     17.096
+     17.922
     ],
     [
      10.014,
-     17.096
+     17.922
     ]
    ],
    "speedup_note": null,
@@ -301,13 +316,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 53161,
+   "agent_seconds_used": 53900,
    "deadline": "2026-10-02T22:03:40Z",
-   "checkpoints": 60,
-   "last_checkpoint_at": "2026-10-02T20:41:42Z",
+   "checkpoints": 62,
+   "last_checkpoint_at": "2026-10-02T21:02:18Z",
    "restores": 0,
-   "model_calls": 483,
-   "last_model_call_at": "2026-10-02T20:42:02Z",
+   "model_calls": 506,
+   "last_model_call_at": "2026-10-02T21:07:08Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -331,13 +346,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 55219,
+   "agent_seconds_used": 56998,
    "deadline": "2026-10-02T21:12:02Z",
-   "checkpoints": 84,
-   "last_checkpoint_at": "2026-10-02T20:45:26Z",
+   "checkpoints": 85,
+   "last_checkpoint_at": "2026-10-02T20:56:42Z",
    "restores": 0,
-   "model_calls": 1335,
-   "last_model_call_at": "2026-10-02T20:45:10Z",
+   "model_calls": 1340,
+   "last_model_call_at": "2026-10-02T21:05:40Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -345,8 +360,7 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null,
-   "stale_since": "2026-10-02T20:49:41Z"
+   "final": null
   },
   {
    "key": "opencode",
@@ -362,7 +376,7 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 51936,
+   "agent_seconds_used": 52675,
    "deadline": "2026-10-02T22:24:05Z",
    "checkpoints": 54,
    "last_checkpoint_at": "2026-10-02T20:47:59Z",
@@ -389,12 +403,12 @@
    "scenario": "D",
    "eval_set_id": "ib-camp-claude-d-3b2d174-vfgs8ydzfcae3k16",
    "eval_set_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-d-3b2d174-vfgs8ydzfcae3k16",
-   "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-d-3b2d174-vfgs8ydzfcae3k16#/samples/2026-10-02T04-26-55-00-00_inference-bench_Wm2haBqARU2HHDDikvdSJ5.eval/sample/D-21-1337/1/",
-   "attempt": 1,
+   "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-d-3b2d174-vfgs8ydzfcae3k16#/samples/2026-10-02T21-02-24-00-00_inference-bench_Wm2haBqARU2HHDDikvdSJ5.eval/sample/D-21-1337/1/",
+   "attempt": 2,
    "status": "restoring",
    "hawk_status": "running",
    "trace_note": null,
-   "error": null,
+   "error": "RuntimeError",
    "agent_seconds": 57600,
    "agent_seconds_used": 15483,
    "deadline": null,
@@ -403,12 +417,25 @@
    "restores": 0,
    "model_calls": 409,
    "last_model_call_at": "2026-10-02T20:46:12Z",
-   "tokens": null,
-   "tokens_as_of": null,
+   "tokens": {
+    "input": 30790555,
+    "cache_read": 133230209,
+    "output": 378151
+   },
+   "tokens_as_of": "2026-10-02T20:46:07Z",
    "tokens_live": false,
-   "cost_usd": null,
+   "cost_usd": 188.16,
    "grader_cost_usd": null,
-   "speedup_history": [],
+   "speedup_history": [
+    [
+     0.309,
+     1.111
+    ],
+    [
+     15.884,
+     1.111
+    ]
+   ],
    "speedup_note": null,
    "final": null
   },
@@ -468,12 +495,12 @@
    "eval_set_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-opencode-d-3b2d17-02k86ddpqobhmrua",
    "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-opencode-d-3b2d17-02k86ddpqobhmrua#/samples/2026-10-02T20-40-07-00-00_inference-bench_NsE753V6gKoTYYpCYDDX96.eval/sample/D-21-1337/1/",
    "attempt": 3,
-   "status": "running",
+   "status": "scoring",
    "hawk_status": "running",
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 57218,
+   "agent_seconds_used": 57600,
    "deadline": "2026-10-02T20:56:03Z",
    "checkpoints": 58,
    "last_checkpoint_at": "2026-10-02T20:28:08Z",
