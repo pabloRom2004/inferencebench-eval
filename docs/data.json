@@ -1,21 +1,30 @@
 {
  "schema_version": 1,
  "phase": "campaign",
- "updated_at": "2026-10-02T11:48:58Z",
+ "updated_at": "2026-10-02T12:03:48Z",
  "refresh_seconds": 600,
  "budget_usd": 3500,
  "spend": {
-  "openrouter_usd": 915.06,
-  "runpod_usd": 400.42,
-  "total_usd": 1315.48,
+  "openrouter_usd": 934.02,
+  "runpod_usd": 403.92,
+  "total_usd": 1337.94,
   "since": "2026-10-02T01:52:26Z",
   "runpod_rate_per_hour": 42.218,
-  "runpod_balance": 123.26,
-  "runpod_balance_change": -42.18,
-  "runpod_balance_change_since": "2026-10-02T11:05:01Z",
-  "checked_at": "2026-10-02T12:03:47Z"
+  "runpod_balance": 119.76,
+  "runpod_balance_change": -35.11,
+  "runpod_balance_change_since": "2026-10-02T11:19:27Z",
+  "checked_at": "2026-10-02T12:11:31Z"
  },
- "errors": [],
+ "errors": [
+  "codex-B: HawkError",
+  "opencode-B: HawkError",
+  "claude-C: HawkError",
+  "codex-C: HawkError",
+  "opencode-C: HawkError",
+  "claude-D: HawkError",
+  "codex-D: HawkError",
+  "opencode-D: HawkError"
+ ],
  "baselines": {
   "D": "measured by a local run on 24 September with the same seed pair and evaluator settings",
   "A": "measured by ib-smoke-opencode-b2da29c-z5rzakmq2wwc8vdg"
@@ -35,13 +44,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 26390,
+   "agent_seconds_used": 27280,
    "deadline": "2026-10-02T20:29:08Z",
-   "checkpoints": 29,
-   "last_checkpoint_at": "2026-10-02T11:44:59Z",
+   "checkpoints": 30,
+   "last_checkpoint_at": "2026-10-02T11:55:34Z",
    "restores": 0,
-   "model_calls": 223,
-   "last_model_call_at": "2026-10-02T11:44:46Z",
+   "model_calls": 226,
+   "last_model_call_at": "2026-10-02T11:56:22Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -65,13 +74,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 34522,
+   "agent_seconds_used": 35412,
    "deadline": "2026-10-02T18:13:36Z",
-   "checkpoints": 52,
-   "last_checkpoint_at": "2026-10-02T11:48:48Z",
+   "checkpoints": 53,
+   "last_checkpoint_at": "2026-10-02T12:03:18Z",
    "restores": 0,
-   "model_calls": 1064,
-   "last_model_call_at": "2026-10-02T11:52:12Z",
+   "model_calls": 1077,
+   "last_model_call_at": "2026-10-02T12:07:02Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -95,7 +104,7 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 29861,
+   "agent_seconds_used": 30751,
    "deadline": "2026-10-02T19:31:17Z",
    "checkpoints": 27,
    "last_checkpoint_at": "2026-10-02T09:31:09Z",
@@ -125,13 +134,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 25750,
+   "agent_seconds_used": 26640,
    "deadline": "2026-10-02T20:39:48Z",
-   "checkpoints": 38,
-   "last_checkpoint_at": "2026-10-02T11:50:12Z",
+   "checkpoints": 39,
+   "last_checkpoint_at": "2026-10-02T12:00:17Z",
    "restores": 0,
-   "model_calls": 443,
-   "last_model_call_at": "2026-10-02T11:53:57Z",
+   "model_calls": 456,
+   "last_model_call_at": "2026-10-02T12:09:16Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -169,7 +178,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:03:48Z"
   },
   {
    "key": "opencode",
@@ -203,7 +213,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:03:48Z"
   },
   {
    "key": "claude",
@@ -233,7 +244,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:03:48Z"
   },
   {
    "key": "codex",
@@ -263,7 +275,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:03:48Z"
   },
   {
    "key": "opencode",
@@ -297,7 +310,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:03:48Z"
   },
   {
    "key": "claude",
@@ -327,7 +341,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:03:48Z"
   },
   {
    "key": "codex",
@@ -357,7 +372,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:03:48Z"
   },
   {
    "key": "opencode",
@@ -387,7 +403,8 @@
    "grader_cost_usd": null,
    "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": null,
+   "stale_since": "2026-10-02T12:03:48Z"
   }
  ]
 }
