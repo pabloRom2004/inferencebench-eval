@@ -1,25 +1,26 @@
 {
  "schema_version": 1,
  "phase": "campaign",
- "updated_at": "2026-10-02T22:11:54Z",
+ "updated_at": "2026-10-02T22:21:54Z",
  "refresh_seconds": 600,
  "budget_usd": 3500,
  "spend": {
   "openrouter_usd": 1745.39,
-  "runpod_usd": 790.8,
-  "total_usd": 2536.19,
+  "runpod_usd": 792.96,
+  "total_usd": 2538.35,
   "since": "2026-10-02T01:52:26Z",
-  "runpod_rate_per_hour": 14.076,
-  "runpod_balance": 136.34,
-  "runpod_balance_change": -19.12,
-  "runpod_balance_change_since": "2026-10-02T21:21:25Z",
-  "checked_at": "2026-10-02T22:13:30Z"
+  "runpod_rate_per_hour": 10.558,
+  "runpod_balance": 134.17,
+  "runpod_balance_change": -17.21,
+  "runpod_balance_change_since": "2026-10-02T21:31:27Z",
+  "checked_at": "2026-10-02T22:23:24Z"
  },
  "errors": [],
  "baselines": {
   "D": "measured by ib-camp-codex-d-3b2d174-uuyh4tuff852ltpm",
   "A": "measured by ib-camp-opencode-a-3b2d17-o6l49pn2u6ju4y77",
-  "B": "measured by ib-camp-opencode-b-6fe2a1-scol6zoczh9jr1nv"
+  "B": "measured by ib-camp-opencode-b-6fe2a1-scol6zoczh9jr1nv",
+  "C": "measured by ib-camp-codex-c-3b2d174-cdjiuiwj7xru9nfl"
  },
  "runs": [
   {
@@ -302,16 +303,16 @@
    "eval_set_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-c-3b2d174-6msl46c5h26euyp0",
    "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-c-3b2d174-6msl46c5h26euyp0#/samples/2026-10-02T22-05-16-00-00_inference-bench_isoMUs5MQz6RBDFPSTtjik.eval/sample/C-21-1337/1/",
    "attempt": 2,
-   "status": "restoring",
+   "status": "running",
    "hawk_status": "running",
    "trace_note": null,
-   "error": "RuntimeError",
+   "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 57077,
-   "deadline": null,
+   "agent_seconds_used": 57388,
+   "deadline": "2026-10-02T22:25:27Z",
    "checkpoints": 67,
    "last_checkpoint_at": "2026-10-02T21:55:09Z",
-   "restores": 0,
+   "restores": 1,
    "model_calls": 594,
    "last_model_call_at": "2026-10-02T22:03:42Z",
    "tokens": {
@@ -379,13 +380,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 56869,
+   "agent_seconds_used": 57469,
    "deadline": "2026-10-02T22:24:05Z",
-   "checkpoints": 55,
-   "last_checkpoint_at": "2026-10-02T21:37:48Z",
+   "checkpoints": 56,
+   "last_checkpoint_at": "2026-10-02T22:13:16Z",
    "restores": 2,
-   "model_calls": 518,
-   "last_model_call_at": "2026-10-02T21:37:58Z",
+   "model_calls": 534,
+   "last_model_call_at": "2026-10-02T22:22:38Z",
    "tokens": {
     "input": 943133,
     "cache_read": 63568512,
@@ -413,13 +414,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 19045,
+   "agent_seconds_used": 19645,
    "deadline": "2026-10-03T08:54:29Z",
-   "checkpoints": 24,
-   "last_checkpoint_at": "2026-10-02T22:08:28Z",
+   "checkpoints": 25,
+   "last_checkpoint_at": "2026-10-02T22:20:14Z",
    "restores": 1,
-   "model_calls": 430,
-   "last_model_call_at": "2026-10-02T22:11:12Z",
+   "model_calls": 438,
+   "last_model_call_at": "2026-10-02T22:21:05Z",
    "tokens": {
     "input": 30790555,
     "cache_read": 133230209,
@@ -498,39 +499,43 @@
    "eval_set_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-opencode-d-3b2d17-02k86ddpqobhmrua",
    "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-opencode-d-3b2d17-02k86ddpqobhmrua#/samples/2026-10-02T20-40-07-00-00_inference-bench_NsE753V6gKoTYYpCYDDX96.eval/sample/D-21-1337/1/",
    "attempt": 3,
-   "status": "scoring",
-   "hawk_status": "running",
+   "status": "scored",
+   "hawk_status": "complete",
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
    "agent_seconds_used": 57600,
-   "deadline": "2026-10-02T20:56:03Z",
+   "deadline": null,
    "checkpoints": 58,
    "last_checkpoint_at": "2026-10-02T20:28:08Z",
    "restores": 2,
    "model_calls": 384,
    "last_model_call_at": "2026-10-02T20:54:31Z",
    "tokens": {
-    "input": 1603596,
-    "cache_read": 70631360,
-    "output": 151338
+    "input": 1594901,
+    "cache_read": 68448192,
+    "output": 151360
    },
-   "tokens_as_of": "2026-10-02T20:33:50Z",
-   "tokens_live": false,
-   "cost_usd": 2.44,
-   "grader_cost_usd": null,
+   "tokens_as_of": "2026-10-02T20:54:25Z",
+   "tokens_live": true,
+   "cost_usd": 2.37,
+   "grader_cost_usd": 3.07,
    "speedup_history": [
     [
-     0.329,
-     0.985
+     0.134,
+     1.26
     ],
     [
-     16.0,
-     0.985
+     15.973,
+     1.26
     ]
    ],
    "speedup_note": null,
-   "final": null
+   "final": {
+    "speedup": 2.676871729260025,
+    "quality_pass": true,
+    "note": null
+   }
   }
  ]
 }
