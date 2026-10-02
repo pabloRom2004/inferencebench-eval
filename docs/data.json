@@ -1,19 +1,19 @@
 {
  "schema_version": 1,
  "phase": "campaign",
- "updated_at": "2026-10-02T21:22:00Z",
+ "updated_at": "2026-10-02T21:32:00Z",
  "refresh_seconds": 600,
  "budget_usd": 3500,
  "spend": {
-  "openrouter_usd": 1735.88,
-  "runpod_usd": 775.75,
-  "total_usd": 2511.63,
+  "openrouter_usd": 1739.66,
+  "runpod_usd": 779.51,
+  "total_usd": 2519.16,
   "since": "2026-10-02T01:52:26Z",
-  "runpod_rate_per_hour": 24.629,
-  "runpod_balance": 151.38,
-  "runpod_balance_change": -27.96,
-  "runpod_balance_change_since": "2026-10-02T20:32:19Z",
-  "checked_at": "2026-10-02T21:31:27Z"
+  "runpod_rate_per_hour": 21.112,
+  "runpod_balance": 147.63,
+  "runpod_balance_change": -20.3,
+  "runpod_balance_change_since": "2026-10-02T20:49:39Z",
+  "checked_at": "2026-10-02T21:41:02Z"
  },
  "errors": [],
  "baselines": {
@@ -163,51 +163,34 @@
    "eval_set_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-b-3b2d174-czpc1p895cskpdc4",
    "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-b-3b2d174-czpc1p895cskpdc4#/samples/2026-10-02T14-56-31-00-00_inference-bench_MgJWepwdFm4qzzj8XkrVmp.eval/sample/B-21-1337/1/",
    "attempt": 2,
-   "status": "scoring",
-   "hawk_status": "running",
+   "status": "scored",
+   "hawk_status": "complete",
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
    "agent_seconds_used": 57600,
-   "deadline": "2026-10-02T21:01:27Z",
+   "deadline": null,
    "checkpoints": 69,
    "last_checkpoint_at": "2026-10-02T21:00:26Z",
    "restores": 1,
    "model_calls": 724,
    "last_model_call_at": "2026-10-02T21:01:23Z",
    "tokens": {
-    "input": 10090053,
-    "cache_read": 164828500,
-    "output": 1065709
+    "input": 13595196,
+    "cache_read": 221844328,
+    "output": 1236589
    },
-   "tokens_as_of": "2026-10-02T14:40:37Z",
-   "tokens_live": false,
-   "cost_usd": 104.73,
-   "grader_cost_usd": null,
-   "speedup_history": [
-    [
-     0.04,
-     0.016
-    ],
-    [
-     0.247,
-     2.625
-    ],
-    [
-     1.653,
-     14.664
-    ],
-    [
-     4.931,
-     17.922
-    ],
-    [
-     10.014,
-     17.922
-    ]
-   ],
+   "tokens_as_of": "2026-10-02T21:01:25Z",
+   "tokens_live": true,
+   "cost_usd": 137.08,
+   "grader_cost_usd": 6.12,
+   "speedup_history": [],
    "speedup_note": null,
-   "final": null
+   "final": {
+    "speedup": 23.318133299170686,
+    "quality_pass": true,
+    "note": null
+   }
   },
   {
    "key": "codex",
@@ -316,13 +299,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 55100,
+   "agent_seconds_used": 55700,
    "deadline": "2026-10-02T22:03:40Z",
-   "checkpoints": 64,
-   "last_checkpoint_at": "2026-10-02T21:22:36Z",
+   "checkpoints": 65,
+   "last_checkpoint_at": "2026-10-02T21:32:57Z",
    "restores": 0,
-   "model_calls": 530,
-   "last_model_call_at": "2026-10-02T21:27:18Z",
+   "model_calls": 548,
+   "last_model_call_at": "2026-10-02T21:35:37Z",
    "tokens": null,
    "tokens_as_of": null,
    "tokens_live": false,
@@ -376,13 +359,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 53875,
+   "agent_seconds_used": 54475,
    "deadline": "2026-10-02T22:24:05Z",
-   "checkpoints": 54,
-   "last_checkpoint_at": "2026-10-02T20:47:59Z",
+   "checkpoints": 55,
+   "last_checkpoint_at": "2026-10-02T21:37:48Z",
    "restores": 2,
-   "model_calls": 517,
-   "last_model_call_at": "2026-10-02T20:57:29Z",
+   "model_calls": 518,
+   "last_model_call_at": "2026-10-02T21:37:58Z",
    "tokens": {
     "input": 943133,
     "cache_read": 63568512,
@@ -410,7 +393,7 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 16051,
+   "agent_seconds_used": 16651,
    "deadline": "2026-10-03T08:54:29Z",
    "checkpoints": 22,
    "last_checkpoint_at": "2026-10-02T21:25:27Z",
