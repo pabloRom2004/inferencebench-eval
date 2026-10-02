@@ -208,6 +208,7 @@ Invalid submissions receive 1×; valid slowdowns can score below 1×. Unavailabl
 
 ### [18] - 2026-09-30
 
+- Checkpoint snapshots may reach 20 GiB per transfer, so a virtualenv kept in the task folder no longer fails every save.
 - The integrity judge runs outside the agent's checkpoints. Claude Code and Codex runs with checkpointing no longer fail scoring with a duplicate `bridge_messages` key, a scoring-only resume runs the judge instead of skipping it, and the judge no longer writes checkpoints of its own.
 - Checkpoints stay in storage after a run finishes (`retention: retain`).
 - Codex uses the served context and compacts at 75% of it for models from non-OpenAI providers such as OpenRouter. A one-model catalog carries the context with Codex's fallback tools and instructions; Codex had capped these models at 272,000 tokens and compacted at 244,800.

@@ -147,6 +147,8 @@ def inference_bench(
             max_consecutive_failures=checkpoint_max_failures,
             # Keep checkpoints after the run finishes; Hawk's eval-set schema does not accept retention.
             retention="retain",
+            # Agents often install a vLLM virtualenv inside the task folder (5 to 10 GB); Inspect's 4 GiB default rejects it.
+            max_sandbox_snapshot_bytes=20 * 1024**3,
         ) if checkpoint else None,
         on_checkpoint=record_checkpoint_time,
         on_resume=resume_environment,
