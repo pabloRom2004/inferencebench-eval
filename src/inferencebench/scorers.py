@@ -5,15 +5,19 @@ import math
 import os
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import anyio
 import inspect_swe
 from inspect_ai.agent import AgentState
+from inspect_ai.log._samples import sample_active
 from inspect_ai.model import ChatMessageUser, GenerateConfig, get_model, model_roles
 from inspect_ai.scorer import Score, Scorer, scorer
 from inspect_ai.util import store
+from inspect_ai.util._checkpoint.checkpointer_noop import _NoopCheckpointer
 
 from inferencebench.dataset import SCENARIOS
 from inferencebench.environment import REMOTE, checked_exec, restart_for_scoring
@@ -66,6 +70,20 @@ def parse_judgment(text: str) -> bool | None:
         "no contamination detected" in contamination
         and "only allowed use detected" in substitution
     )
+
+
+@contextmanager
+def outside_agent_checkpoint() -> Iterator[None]:
+    """Run the judge on Inspect's inert checkpoint session so it neither joins nor writes the agent's checkpoints."""
+    # The sample has one checkpoint session, and an agent bridge's "bridge_*" keys stay registered on it
+    # after the agent returns. A judge bridge on that session collides with them, and on a scoring-only
+    # resume it returns without judging.
+    active = sample_active()
+    agent_checkpoint, active.checkpointer = active.checkpointer, _NoopCheckpointer()
+    try:
+        yield
+    finally:
+        active.checkpointer = agent_checkpoint
 
 
 async def stage_evidence(env, folder: Path) -> list[str]:
@@ -161,7 +179,8 @@ async def judge_submission(
     for attempt_number in range(1, max_grader_attempts + 1):
         # Verdicts must come from this judge run, not from files the agent left behind.
         await checked_exec(env, ["rm", "-f", *paths], 30)
-        attempt = await judge(AgentState(messages=[ChatMessageUser(content=prompt)]))
+        with outside_agent_checkpoint():
+            attempt = await judge(AgentState(messages=[ChatMessageUser(content=prompt)]))
         result = attempt.messages[-1].text if attempt.messages else ""
         verdicts = {}
         for name, path in zip(VERDICT_FILES, paths):

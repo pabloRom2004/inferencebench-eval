@@ -35,6 +35,7 @@ from tests.inferencebench.test_task import judge_model
 from tests.inferencebench.test_task import local_task as local_task
 
 CLI = importlib.import_module("inferencebench.harness_default")
+SCORERS = importlib.import_module("inferencebench.scorers")
 
 
 @pytest.mark.parametrize("harness", CLI_HARNESSES)
@@ -162,6 +163,126 @@ def test_cli_checkpoint_preserves_progress_and_scoring(
         previous = [read_eval_log(path) for path in (tmp_path / "evals").glob("*.eval")]
         failed = next(log.samples[0] for log in previous if log.samples[0].error)
         assert not failed.scores
+
+
+@pytest.mark.parametrize("harness", ["codex_cli", "claude_code"])
+@pytest.mark.parametrize("stop", ["deadline", "complete"])
+def test_claude_code_judge_scores_checkpointed_cli(
+    local_task, monkeypatch, tmp_path, harness, stop
+):
+    """Judge a checkpointed native CLI with Claude Code's checkpoint contract at the deadline and after a scoring-only resume."""
+    task, env = local_task
+    env.write_file = AsyncMock()
+    task.dataset[0].metadata["agent_seconds"] = 3600 if stop == "deadline" else None
+    monkeypatch.setattr(CLI, "sandbox", lambda name=None: env)
+    monkeypatch.setattr(
+        "inferencebench.utils.harnesses.cli.options.sandbox", lambda name=None: env
+    )
+    native = importlib.import_module(f"inspect_swe._{harness}.{harness}")
+    judge_native = importlib.import_module("inspect_swe._claude_code.claude_code")
+    original_factory = getattr(importlib.import_module("inspect_swe"), harness)
+    original_score = task.scorer[0]
+    stub_judge = SCORERS.judge_cli
+    scorer_calls = 0
+    resumes = []
+
+    @functools.wraps(original_factory)
+    def native_cli(**kwargs):
+        """Register the agent bridge on the sample checkpoint while replacing the native process."""
+
+        async def execute(state):
+            """Save one turn, then keep working until the deadline cancels the CLI or finish voluntarily."""
+            async with native.checkpointer() as cp:
+                bridge = AgentBridge(state, checkpointer=cp)
+                if cp.attempt == "resume_for_scoring":
+                    return bridge.state
+                state.output = await get_model().generate(state.messages)
+                state.messages = [*state.messages, state.output.message]
+                await cp.checkpoint()
+                if stop == "deadline":
+                    # Reach the deadline right after the save, so the cancellation never lands mid-save.
+                    CLI.reschedule_deadline(time.time())
+                    await asyncio.sleep(3600)
+                return state
+
+        return execute
+
+    def claude_code_judge(**kwargs):
+        """Keep Claude Code's checkpoint and bridge contract around the stub that writes the verdict files."""
+        stub = stub_judge(**kwargs)
+
+        async def execute(state):
+            """Open the judge's bridge on whatever checkpoint session Claude Code would receive."""
+            async with judge_native.checkpointer() as cp:
+                bridge = AgentBridge(state, checkpointer=cp)
+                if cp.attempt == "resume_for_scoring":
+                    return bridge.state
+                await cp.tick()
+                return await stub(state)
+
+        return execute
+
+    @scorer(metrics=[])
+    def retry_scorer():
+        """Run the real task scorer, failing once before grading when the agent completed."""
+
+        async def score(state, target):
+            """Send a completed agent to a scoring-only resume before the judge runs."""
+            nonlocal scorer_calls
+            scorer_calls += 1
+            if stop == "complete" and scorer_calls == 1:
+                raise RuntimeError("injected scorer failure after agent completion")
+            return await original_score(state, target)
+
+        return score
+
+    async def resumed(state, attempt):
+        """Record the resume phase selected from the saved checkpoint."""
+        resumes.append(attempt)
+
+    monkeypatch.setattr(importlib.import_module("inspect_swe"), harness, native_cli)
+    monkeypatch.setattr(SCORERS, "judge_cli", claude_code_judge)
+    task.solver = as_solver(
+        cli_agent(
+            harness,
+            cli_poll_timeout=None,
+            nudge_prompt=False,
+            token_budget_reminder=False,
+        )
+    )
+    task.scorer = [retry_scorer()]
+    task.on_resume = resumed
+    task.fail_on_error = True
+    success, logs = eval_set(
+        task,
+        model=get_model("mockllm/subject", memoize=False),
+        model_roles={"integrity": judge_model()},
+        checkpoint=CheckpointConfig(
+            trigger=TurnInterval(every=1),
+            checkpoints_location=str(tmp_path / "checkpoints"),
+        ),
+        log_dir=str(tmp_path / "evals"),
+        retry_attempts=2,
+        retry_wait=0.001,
+        retry_immediate=False,
+        retry_cleanup=False,
+        display="none",
+        log_shared=False,
+    )
+    attempts = list((tmp_path / "evals").glob("*.eval"))
+    sample = read_eval_log(logs[-1].location).samples[0]
+    assert success, sample.error
+    assert sample.error is None
+    assert sample.scores["retry_scorer"].value == {"speedup": 2.0}
+    if stop == "deadline":
+        # One attempt: the judge neither collides with nor writes into the agent's checkpoints.
+        assert len(attempts) == 1 and resumes == []
+        assert sample.store["agent_deadline_reached"] is True
+        assert [e.trigger for e in sample.events if e.event == "checkpoint"] == [
+            "manual"
+        ]
+    else:
+        assert len(attempts) == 2 and resumes == ["resume_for_scoring"]
 
 
 @pytest.mark.parametrize("harness", ["react", "original"])

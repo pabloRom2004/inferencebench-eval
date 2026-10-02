@@ -145,6 +145,8 @@ def inference_bench(
             trigger=TimeInterval(every=timedelta(seconds=checkpoint_seconds)),
             sandbox_paths={"default": CHECKPOINT_PATHS},
             max_consecutive_failures=checkpoint_max_failures,
+            # Keep checkpoints after the run finishes; Hawk's eval-set schema does not accept retention.
+            retention="retain",
         ) if checkpoint else None,
         on_checkpoint=record_checkpoint_time,
         on_resume=resume_environment,
