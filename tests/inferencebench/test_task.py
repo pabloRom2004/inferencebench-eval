@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import json
 import math
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -80,13 +81,14 @@ def verdict_file(path):
 
 @pytest.fixture(autouse=True)
 def remove_mock_logs():
-    """Keep temporary mock logs in the flat logs directory and remove only logs created by this test."""
+    """Keep temporary mock logs in the flat logs directory and remove only logs, and their retained checkpoints, created by this test."""
     folder = Path("logs")
     before = set(folder.glob("*.eval"))
     yield
     for path in set(folder.glob("*.eval")) - before:
         if read_eval_log(path, header_only=True).eval.model.startswith("mockllm/"):
             path.unlink()
+            shutil.rmtree(path.with_suffix(".checkpoints"), ignore_errors=True)
 
 
 def measurements(scale=1):
