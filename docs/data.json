@@ -1,19 +1,19 @@
 {
  "schema_version": 1,
  "phase": "smoke",
- "updated_at": "2026-10-02T00:42:24Z",
+ "updated_at": "2026-10-02T00:52:24Z",
  "refresh_seconds": 600,
  "budget_usd": 2500,
  "spend": {
-  "openrouter_usd": 3.73,
-  "runpod_usd": 9.09,
-  "total_usd": 12.82,
+  "openrouter_usd": 4.21,
+  "runpod_usd": 9.68,
+  "total_usd": 13.89,
   "since": "2026-10-01T18:14:07Z",
   "runpod_rate_per_hour": 3.523,
-  "runpod_balance": 123.28,
-  "runpod_balance_change": -1.62,
-  "runpod_balance_change_since": "2026-10-01T23:52:27Z",
-  "checked_at": "2026-10-02T00:42:28Z"
+  "runpod_balance": 122.7,
+  "runpod_balance_change": -2.2,
+  "runpod_balance_change_since": "2026-10-02T00:02:28Z",
+  "checked_at": "2026-10-02T00:52:25Z"
  },
  "errors": [],
  "baselines": {
