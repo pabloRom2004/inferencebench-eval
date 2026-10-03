@@ -1,19 +1,19 @@
 {
  "schema_version": 1,
  "phase": "campaign",
- "updated_at": "2026-10-03T10:01:58Z",
+ "updated_at": "2026-10-03T10:11:58Z",
  "refresh_seconds": 600,
  "budget_usd": 3500,
  "spend": {
-  "openrouter_usd": 1912.09,
-  "runpod_usd": 836.17,
-  "total_usd": 2748.26,
+  "openrouter_usd": 1919.2,
+  "runpod_usd": 836.76,
+  "total_usd": 2755.95,
   "since": "2026-10-02T01:52:26Z",
-  "runpod_rate_per_hour": 3.523,
-  "runpod_balance": 190.96,
-  "runpod_balance_change": -2.93,
-  "runpod_balance_change_since": "2026-10-03T09:12:15Z",
-  "checked_at": "2026-10-03T10:02:29Z"
+  "runpod_rate_per_hour": 0.005,
+  "runpod_balance": 190.37,
+  "runpod_balance_change": -2.94,
+  "runpod_balance_change_since": "2026-10-03T09:22:16Z",
+  "checked_at": "2026-10-03T10:12:12Z"
  },
  "errors": [],
  "baselines": {
@@ -417,34 +417,34 @@
    "eval_set_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-d-3b2d174-vfgs8ydzfcae3k16",
    "log_url": "https://viewer.hawk.hawk.generalitylabs.ai/eval-set/ib-camp-claude-d-3b2d174-vfgs8ydzfcae3k16#/samples/2026-10-03T09-04-45-00-00_inference-bench_Wm2haBqARU2HHDDikvdSJ5.eval/sample/D-21-1337/1/",
    "attempt": 3,
-   "status": "running",
-   "hawk_status": "running",
+   "status": "errored",
+   "hawk_status": "failed",
    "trace_note": null,
-   "error": null,
+   "error": "RuntimeError",
    "agent_seconds": 57600,
-   "agent_seconds_used": 25085,
-   "deadline": "2026-10-03T19:03:52Z",
+   "agent_seconds_used": 23747,
+   "deadline": null,
    "checkpoints": 30,
    "last_checkpoint_at": "2026-10-03T09:39:52Z",
    "restores": 2,
    "model_calls": 609,
    "last_model_call_at": "2026-10-03T10:02:14Z",
    "tokens": {
-    "input": 28540680,
-    "cache_read": 134672407,
-    "output": 408178
+    "input": 9300726,
+    "cache_read": 106126911,
+    "output": 280798
    },
-   "tokens_as_of": "2026-10-03T08:48:24Z",
-   "tokens_live": false,
-   "cost_usd": 177.8,
+   "tokens_as_of": "2026-10-03T10:10:42Z",
+   "tokens_live": true,
+   "cost_usd": 73.34,
    "grader_cost_usd": null,
    "speedup_history": [
     [
-     0.309,
+     0.0,
      1.421
     ],
     [
-     15.899,
+     7.114,
      1.421
     ]
    ],
