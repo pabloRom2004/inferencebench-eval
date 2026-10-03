@@ -1,19 +1,19 @@
 {
  "schema_version": 1,
  "phase": "campaign",
- "updated_at": "2026-10-03T07:41:57Z",
+ "updated_at": "2026-10-03T07:51:57Z",
  "refresh_seconds": 600,
  "budget_usd": 3500,
  "spend": {
-  "openrouter_usd": 1887.74,
-  "runpod_usd": 828.33,
-  "total_usd": 2716.07,
+  "openrouter_usd": 1890.91,
+  "runpod_usd": 828.91,
+  "total_usd": 2719.82,
   "since": "2026-10-02T01:52:26Z",
   "runpod_rate_per_hour": 3.523,
-  "runpod_balance": 198.8,
+  "runpod_balance": 198.22,
   "runpod_balance_change": 97.06,
-  "runpod_balance_change_since": "2026-10-03T06:54:06Z",
-  "checked_at": "2026-10-03T07:44:11Z"
+  "runpod_balance_change_since": "2026-10-03T07:04:05Z",
+  "checked_at": "2026-10-03T07:54:14Z"
  },
  "errors": [],
  "baselines": {
@@ -422,13 +422,13 @@
    "trace_note": null,
    "error": null,
    "agent_seconds": 57600,
-   "agent_seconds_used": 53248,
+   "agent_seconds_used": 53848,
    "deadline": "2026-10-03T08:54:29Z",
    "checkpoints": 28,
    "last_checkpoint_at": "2026-10-02T23:03:46Z",
    "restores": 1,
-   "model_calls": 570,
-   "last_model_call_at": "2026-10-03T07:38:11Z",
+   "model_calls": 573,
+   "last_model_call_at": "2026-10-03T07:53:44Z",
    "tokens": {
     "input": 30790555,
     "cache_read": 133230209,
